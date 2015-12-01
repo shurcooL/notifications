@@ -1,9 +1,15 @@
 package notifications
 
-import "src.sourcegraph.com/apps/tracker/issues"
+import (
+	"html/template"
+	"time"
+
+	"golang.org/x/net/context"
+	"src.sourcegraph.com/apps/tracker/issues"
+)
 
 type Service interface {
-	// TODO.
+	List(ctx context.Context, opt interface{}) ([]Notification, error)
 
 	// TODO: This doesn't belong here, does it?
 	//CurrentUser(ctx context.Context) (*User, error)
@@ -13,4 +19,21 @@ type CopierFrom interface {
 	CopyFrom(src Service, repo issues.RepoSpec) error // TODO: Consider best place for RepoSpec?
 }
 
-// TODO.
+type Notification struct {
+	RepoSpec issues.RepoSpec
+
+	Subject NotificationSubject
+
+	UpdatedAt time.Time
+}
+
+type NotificationSubject struct {
+	Title            string
+	URL              string
+	LatestCommentURL string
+	Type             string
+
+	// TODO.
+	HTMLURL template.URL
+	State   string
+}
