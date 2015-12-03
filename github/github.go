@@ -67,25 +67,21 @@ func (s service) List(ctx context.Context, opt interface{}) ([]notifications.Not
 	}
 	for _, n := range ghNotifications {
 		notification := notifications.Notification{
-			RepoSpec: issues.RepoSpec{URI: *n.Repository.FullName},
-			Subject: notifications.NotificationSubject{
-				Title:            *n.Subject.Title,
-				URL:              *n.Subject.URL,
-				LatestCommentURL: *n.Subject.LatestCommentURL,
-				Type:             *n.Subject.Type,
-			},
+			Type:      *n.Subject.Type,
+			RepoSpec:  issues.RepoSpec{URI: *n.Repository.FullName},
+			Title:     *n.Subject.Title,
 			UpdatedAt: *n.UpdatedAt,
 		}
 
 		switch *n.Subject.Type {
 		case "Issue":
 			var err error
-			notification.Subject.State, err = s.getIssueState(*n.Subject.URL)
+			notification.HTMLURL, err = s.getIssueURL(*n.Subject)
 			if err != nil {
 				return ns, err
 			}
 
-			notification.Subject.HTMLURL, err = s.getIssueURL(*n.Subject)
+			notification.State, err = s.getIssueState(*n.Subject.URL)
 			if err != nil {
 				return ns, err
 			}

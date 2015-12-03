@@ -11,6 +11,10 @@ import (
 type Service interface {
 	List(ctx context.Context, opt interface{}) ([]Notification, error)
 
+	Subscribe(ctx context.Context, repo issues.RepoSpec, appID string, threadID uint64, actors []issues.UserSpec) error
+
+	MarkRead(ctx context.Context, repo issues.RepoSpec, appID string, threadID uint64) error
+
 	// TODO: This doesn't belong here, does it?
 	//CurrentUser(ctx context.Context) (*User, error)
 }
@@ -20,20 +24,10 @@ type CopierFrom interface {
 }
 
 type Notification struct {
-	RepoSpec issues.RepoSpec
-
-	Subject NotificationSubject
-
+	RepoSpec  issues.RepoSpec
+	Type      string
+	Title     string
+	HTMLURL   template.URL
 	UpdatedAt time.Time
-}
-
-type NotificationSubject struct {
-	Title            string
-	URL              string
-	LatestCommentURL string
-	Type             string
-
-	// TODO.
-	HTMLURL template.URL
-	State   string
+	State     string
 }
