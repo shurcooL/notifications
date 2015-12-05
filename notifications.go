@@ -9,17 +9,20 @@ import (
 )
 
 type Service interface {
-	List(ctx context.Context, opt interface{}) ([]Notification, error)
+	InternalService
+	ExternalService
+}
 
+type InternalService interface {
+	List(ctx context.Context, opt interface{}) (Notifications, error)
+}
+
+type ExternalService interface {
 	Subscribe(ctx context.Context, appID string, repo issues.RepoSpec, threadID uint64, subscribers []issues.UserSpec) error
 
 	MarkRead(ctx context.Context, appID string, repo issues.RepoSpec, threadID uint64) error
 
-	// TODO.
-	Create(ctx context.Context, appID string, repo issues.RepoSpec, threadID uint64, notification Notification) error
-
-	// TODO: This doesn't belong here, does it?
-	//CurrentUser(ctx context.Context) (*User, error)
+	Notify(ctx context.Context, appID string, repo issues.RepoSpec, threadID uint64, notification Notification) error
 }
 
 type CopierFrom interface {
@@ -28,12 +31,15 @@ type CopierFrom interface {
 
 type Notification struct {
 	RepoSpec  issues.RepoSpec
-	Type      string // TODO: Give it a named type? Or something?
+	RepoURL   template.URL
 	Title     string
-	HTMLURL   template.URL
+	Icon      OcticonID
 	UpdatedAt time.Time
-	State     string // TODO: Change to icon, etc.?
+	HTMLURL   template.URL // Address of notification target.
 }
+
+// Octicon ID. E.g., "issue-opened".
+type OcticonID string
 
 // Notifications implements sort.Interface.
 type Notifications []Notification
