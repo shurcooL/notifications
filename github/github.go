@@ -58,7 +58,7 @@ type repoSpec struct {
 	Repo  string
 }
 
-func (s service) List(ctx context.Context, opt interface{}) ([]notifications.Notification, error) {
+func (s service) List(ctx context.Context, opt interface{}) (notifications.Notifications, error) {
 	var ns []notifications.Notification
 
 	ghNotifications, _, err := s.cl.Activity.ListNotifications(nil)
@@ -67,21 +67,26 @@ func (s service) List(ctx context.Context, opt interface{}) ([]notifications.Not
 	}
 	for _, n := range ghNotifications {
 		notification := notifications.Notification{
-			Type:      *n.Subject.Type,
 			RepoSpec:  issues.RepoSpec{URI: *n.Repository.FullName},
+			RepoURL:   template.URL("https://github.com/" + *n.Repository.FullName),
 			Title:     *n.Subject.Title,
 			UpdatedAt: *n.UpdatedAt,
 		}
 
 		switch *n.Subject.Type {
 		case "Issue":
-			var err error
-			notification.HTMLURL, err = s.getIssueURL(*n.Subject)
+			state, err := s.getIssueState(*n.Subject.URL)
 			if err != nil {
 				return ns, err
 			}
+			switch state {
+			case "open":
+				notification.Icon = "issue-opened"
+			case "closed":
+				notification.Icon = "issue-closed"
+			}
 
-			notification.State, err = s.getIssueState(*n.Subject.URL)
+			notification.HTMLURL, err = s.getIssueURL(*n.Subject)
 			if err != nil {
 				return ns, err
 			}
@@ -91,6 +96,28 @@ func (s service) List(ctx context.Context, opt interface{}) ([]notifications.Not
 	}
 
 	return ns, nil
+}
+
+func (s service) Count(ctx context.Context, opt interface{}) (uint64, error) {
+	ghNotifications, _, err := s.cl.Activity.ListNotifications(nil)
+	return uint64(len(ghNotifications)), err
+}
+
+func (s service) MarkRead(ctx context.Context, appID string, repo issues.RepoSpec, threadID uint64) error {
+	// TODO: Move the markRead helper from tracker/issues/github service to here.
+	panic("not implemented")
+}
+
+func (s service) Notify(ctx context.Context, appID string, repo issues.RepoSpec, threadID uint64, op notifications.Notification) error {
+	// Nothing to do. GitHub takes care of this on their end.
+	// TODO: Confirm the above is true. Maybe this needs to be done after all when creating comments/issues via API.
+	return nil
+}
+
+func (s service) Subscribe(ctx context.Context, appID string, repo issues.RepoSpec, threadID uint64, subscribers []issues.UserSpec) error {
+	// Nothing to do. GitHub takes care of this on their end.
+	// TODO: Confirm the above is true. Maybe this needs to be done after all when creating comments/issues via API.
+	return nil
 }
 
 func (s service) getIssueState(issueAPIURL string) (string, error) {
