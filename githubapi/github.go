@@ -1,5 +1,5 @@
-// Package github implements notifications.Service using GitHub API client.
-package github
+// Package githubapi implements notifications.Service using GitHub API client.
+package githubapi
 
 import (
 	"fmt"
@@ -103,9 +103,31 @@ func (s service) Count(ctx context.Context, opt interface{}) (uint64, error) {
 	return uint64(len(ghNotifications)), err
 }
 
-func (s service) MarkRead(ctx context.Context, appID string, repo issues.RepoSpec, threadID uint64) error {
-	// TODO: Move the markRead helper from tracker/issues/github service to here.
-	panic("not implemented")
+func (s service) MarkRead(ctx context.Context, appID string, rs issues.RepoSpec, threadID uint64) error {
+	repo := ghRepoSpec(rs)
+	ns, _, err := s.cl.Activity.ListRepositoryNotifications(repo.Owner, repo.Repo, nil)
+	if err != nil {
+		return fmt.Errorf("failed to ListRepositoryNotifications: %v", err)
+	}
+	for _, n := range ns {
+		if *n.Subject.Type != appID {
+			continue
+		}
+		_, issueID, err := parseIssueSpec(*n.Subject.URL)
+		if err != nil {
+			return fmt.Errorf("failed to parseIssueSpec: %v", err)
+		}
+		if uint64(issueID) != threadID {
+			continue
+		}
+
+		_, err = s.cl.Activity.MarkThreadRead(*n.ID)
+		if err != nil {
+			return fmt.Errorf("failed to MarkThreadRead: %v", err)
+		}
+		break
+	}
+	return nil
 }
 
 func (s service) Notify(ctx context.Context, appID string, repo issues.RepoSpec, threadID uint64, op notifications.Notification) error {
