@@ -12,7 +12,6 @@ import (
 	"github.com/google/go-github/github"
 	"golang.org/x/net/context"
 	"src.sourcegraph.com/apps/notifications/notifications"
-	"src.sourcegraph.com/apps/tracker/issues"
 )
 
 // NewService creates a GitHub-backed notifications.Service using given GitHub client.
@@ -45,11 +44,11 @@ func NewService(client *github.Client) notifications.Service {
 type service struct {
 	cl *github.Client
 
-	currentUser    *issues.User
+	currentUser    *notifications.User
 	currentUserErr error
 }
 
-func (s service) CurrentUser(_ context.Context) (*issues.User, error) {
+func (s service) CurrentUser(_ context.Context) (*notifications.User, error) {
 	return s.currentUser, s.currentUserErr
 }
 
@@ -67,7 +66,7 @@ func (s service) List(ctx context.Context, opt interface{}) (notifications.Notif
 	}
 	for _, n := range ghNotifications {
 		notification := notifications.Notification{
-			RepoSpec:  issues.RepoSpec{URI: *n.Repository.FullName},
+			RepoSpec:  notifications.RepoSpec{URI: *n.Repository.FullName},
 			RepoURL:   template.URL("https://github.com/" + *n.Repository.FullName),
 			Title:     *n.Subject.Title,
 			UpdatedAt: *n.UpdatedAt,
@@ -103,7 +102,7 @@ func (s service) Count(ctx context.Context, opt interface{}) (uint64, error) {
 	return uint64(len(ghNotifications)), err
 }
 
-func (s service) MarkRead(ctx context.Context, appID string, rs issues.RepoSpec, threadID uint64) error {
+func (s service) MarkRead(ctx context.Context, appID string, rs notifications.RepoSpec, threadID uint64) error {
 	repo := ghRepoSpec(rs)
 	ns, _, err := s.cl.Activity.ListRepositoryNotifications(repo.Owner, repo.Repo, nil)
 	if err != nil {
@@ -130,13 +129,13 @@ func (s service) MarkRead(ctx context.Context, appID string, rs issues.RepoSpec,
 	return nil
 }
 
-func (s service) Notify(ctx context.Context, appID string, repo issues.RepoSpec, threadID uint64, op notifications.Notification) error {
+func (s service) Notify(ctx context.Context, appID string, repo notifications.RepoSpec, threadID uint64, op notifications.Notification) error {
 	// Nothing to do. GitHub takes care of this on their end.
 	// TODO: Confirm the above is true. Maybe this needs to be done after all when creating comments/issues via API.
 	return nil
 }
 
-func (s service) Subscribe(ctx context.Context, appID string, repo issues.RepoSpec, threadID uint64, subscribers []issues.UserSpec) error {
+func (s service) Subscribe(ctx context.Context, appID string, repo notifications.RepoSpec, threadID uint64, subscribers []notifications.UserSpec) error {
 	// Nothing to do. GitHub takes care of this on their end.
 	// TODO: Confirm the above is true. Maybe this needs to be done after all when creating comments/issues via API.
 	return nil
@@ -170,48 +169,48 @@ func (s service) getIssueURL(n github.NotificationSubject) (template.URL, error)
 	return template.URL(fmt.Sprintf("/github.com/%s/issues/%d%s", rs.URI, issueID, fragment)), nil
 }
 
-func parseIssueSpec(issueAPIURL string) (issues.RepoSpec, int, error) {
+func parseIssueSpec(issueAPIURL string) (notifications.RepoSpec, int, error) {
 	u, err := url.Parse(issueAPIURL)
 	if err != nil {
-		return issues.RepoSpec{}, 0, err
+		return notifications.RepoSpec{}, 0, err
 	}
 	e := strings.Split(u.Path, "/")
 	if len(e) < 5 {
-		return issues.RepoSpec{}, 0, fmt.Errorf("unexpected path (too few elements): %q", u.Path)
+		return notifications.RepoSpec{}, 0, fmt.Errorf("unexpected path (too few elements): %q", u.Path)
 	}
 	if got, want := e[len(e)-2], "issues"; got != want {
-		return issues.RepoSpec{}, 0, fmt.Errorf(`unexpected path element %q, expecting %q`, got, want)
+		return notifications.RepoSpec{}, 0, fmt.Errorf(`unexpected path element %q, expecting %q`, got, want)
 	}
 	id, err := strconv.Atoi(e[len(e)-1])
 	if err != nil {
-		return issues.RepoSpec{}, 0, err
+		return notifications.RepoSpec{}, 0, err
 	}
-	return issues.RepoSpec{URI: e[len(e)-4] + "/" + e[len(e)-3]}, id, nil
+	return notifications.RepoSpec{URI: e[len(e)-4] + "/" + e[len(e)-3]}, id, nil
 }
 
-func parseIssueCommentSpec(issueAPIURL string) (issues.RepoSpec, int, error) {
+func parseIssueCommentSpec(issueAPIURL string) (notifications.RepoSpec, int, error) {
 	u, err := url.Parse(issueAPIURL)
 	if err != nil {
-		return issues.RepoSpec{}, 0, err
+		return notifications.RepoSpec{}, 0, err
 	}
 	e := strings.Split(u.Path, "/")
 	if len(e) < 6 {
-		return issues.RepoSpec{}, 0, fmt.Errorf("unexpected path (too few elements): %q", u.Path)
+		return notifications.RepoSpec{}, 0, fmt.Errorf("unexpected path (too few elements): %q", u.Path)
 	}
 	if got, want := e[len(e)-2], "comments"; got != want {
-		return issues.RepoSpec{}, 0, fmt.Errorf(`unexpected path element %q, expecting %q`, got, want)
+		return notifications.RepoSpec{}, 0, fmt.Errorf(`unexpected path element %q, expecting %q`, got, want)
 	}
 	if got, want := e[len(e)-3], "issues"; got != want {
-		return issues.RepoSpec{}, 0, fmt.Errorf(`unexpected path element %q, expecting %q`, got, want)
+		return notifications.RepoSpec{}, 0, fmt.Errorf(`unexpected path element %q, expecting %q`, got, want)
 	}
 	id, err := strconv.Atoi(e[len(e)-1])
 	if err != nil {
-		return issues.RepoSpec{}, 0, err
+		return notifications.RepoSpec{}, 0, err
 	}
-	return issues.RepoSpec{URI: e[len(e)-5] + "/" + e[len(e)-4]}, id, nil
+	return notifications.RepoSpec{URI: e[len(e)-5] + "/" + e[len(e)-4]}, id, nil
 }
 
-func ghRepoSpec(repo issues.RepoSpec) repoSpec {
+func ghRepoSpec(repo notifications.RepoSpec) repoSpec {
 	ownerRepo := strings.Split(repo.URI, "/")
 	if len(ownerRepo) != 2 {
 		panic(fmt.Errorf(`RepoSpec is not of form "owner/repo": %v`, repo))
@@ -222,9 +221,9 @@ func ghRepoSpec(repo issues.RepoSpec) repoSpec {
 	}
 }
 
-func ghUser(user *github.User) issues.User {
-	return issues.User{
-		UserSpec: issues.UserSpec{
+func ghUser(user *github.User) notifications.User {
+	return notifications.User{
+		UserSpec: notifications.UserSpec{
 			ID:     uint64(*user.ID),
 			Domain: "github.com",
 		},
