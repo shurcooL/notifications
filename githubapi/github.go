@@ -81,11 +81,30 @@ func (s service) List(ctx context.Context, opt interface{}) (notifications.Notif
 			switch state {
 			case "open":
 				notification.Icon = "issue-opened"
+				notification.Color = notifications.RGB{0x6c, 0xc6, 0x44}
 			case "closed":
 				notification.Icon = "issue-closed"
+				notification.Color = notifications.RGB{0xbd, 0x2c, 0x00}
 			}
-
 			notification.HTMLURL, err = s.getIssueURL(*n.Subject)
+			if err != nil {
+				return ns, err
+			}
+		case "PullRequest":
+			notification.Icon = "git-pull-request"
+			state, err := s.getPullRequestState(*n.Subject.URL)
+			if err != nil {
+				return ns, err
+			}
+			switch state {
+			case "open":
+				notification.Color = notifications.RGB{0x6c, 0xc6, 0x44}
+			case "closed":
+				notification.Color = notifications.RGB{0xbd, 0x2c, 0x00}
+			case "merged":
+				notification.Color = notifications.RGB{0x6e, 0x54, 0x94}
+			}
+			notification.HTMLURL, err = s.getPullRequestURL(*n.Subject)
 			if err != nil {
 				return ns, err
 			}
@@ -130,14 +149,12 @@ func (s service) MarkRead(ctx context.Context, appID string, rs notifications.Re
 }
 
 func (s service) Notify(ctx context.Context, appID string, repo notifications.RepoSpec, threadID uint64, op notifications.Notification) error {
-	// Nothing to do. GitHub takes care of this on their end.
-	// TODO: Confirm the above is true. Maybe this needs to be done after all when creating comments/issues via API.
+	// Nothing to do. GitHub takes care of this on their end, even when creating comments/issues via API.
 	return nil
 }
 
 func (s service) Subscribe(ctx context.Context, appID string, repo notifications.RepoSpec, threadID uint64, subscribers []notifications.UserSpec) error {
-	// Nothing to do. GitHub takes care of this on their end.
-	// TODO: Confirm the above is true. Maybe this needs to be done after all when creating comments/issues via API.
+	// Nothing to do. GitHub takes care of this on their end, even when creating comments/issues via API.
 	return nil
 }
 
@@ -157,6 +174,27 @@ func (s service) getIssueState(issueAPIURL string) (string, error) {
 	return *issue.State, nil
 }
 
+func (s service) getPullRequestState(prAPIURL string) (string, error) {
+	req, err := s.cl.NewRequest("GET", prAPIURL, nil)
+	if err != nil {
+		return "", err
+	}
+	pr := new(github.PullRequest)
+	_, err = s.cl.Do(req, pr)
+	if err != nil {
+		return "", err
+	}
+	if pr.State == nil || pr.Merged == nil {
+		return "", fmt.Errorf("for some reason pr.State or pr.Merged is nil for %q: %v", prAPIURL, pr)
+	}
+	switch {
+	default:
+		return *pr.State, nil
+	case *pr.Merged:
+		return "merged", nil
+	}
+}
+
 func (s service) getIssueURL(n github.NotificationSubject) (template.URL, error) {
 	rs, issueID, err := parseIssueSpec(*n.URL)
 	if err != nil {
@@ -169,8 +207,28 @@ func (s service) getIssueURL(n github.NotificationSubject) (template.URL, error)
 	return template.URL(fmt.Sprintf("/github.com/%s/issues/%d%s", rs.URI, issueID, fragment)), nil
 }
 
-func parseIssueSpec(issueAPIURL string) (notifications.RepoSpec, int, error) {
-	u, err := url.Parse(issueAPIURL)
+func (s service) getPullRequestURL(n github.NotificationSubject) (template.URL, error) {
+	rs, prID, err := parsePullRequestSpec(*n.URL)
+	if err != nil {
+		return "", err
+	}
+	var fragment string
+	if _, commentID, err := parseIssueCommentSpec(*n.LatestCommentURL); err == nil {
+		fragment = fmt.Sprintf("#comment-%d", commentID)
+	}
+	return template.URL(fmt.Sprintf("https://github.com/%s/pull/%d%s", rs.URI, prID, fragment)), nil
+}
+
+func parseIssueSpec(issueAPIURL string) (_ notifications.RepoSpec, id int, _ error) {
+	return parseSpec(issueAPIURL, "issues")
+}
+
+func parsePullRequestSpec(prAPIURL string) (_ notifications.RepoSpec, id int, _ error) {
+	return parseSpec(prAPIURL, "pulls")
+}
+
+func parseSpec(apiURL, specType string) (_ notifications.RepoSpec, id int, _ error) {
+	u, err := url.Parse(apiURL)
 	if err != nil {
 		return notifications.RepoSpec{}, 0, err
 	}
@@ -178,10 +236,10 @@ func parseIssueSpec(issueAPIURL string) (notifications.RepoSpec, int, error) {
 	if len(e) < 5 {
 		return notifications.RepoSpec{}, 0, fmt.Errorf("unexpected path (too few elements): %q", u.Path)
 	}
-	if got, want := e[len(e)-2], "issues"; got != want {
+	if got, want := e[len(e)-2], specType; got != want {
 		return notifications.RepoSpec{}, 0, fmt.Errorf(`unexpected path element %q, expecting %q`, got, want)
 	}
-	id, err := strconv.Atoi(e[len(e)-1])
+	id, err = strconv.Atoi(e[len(e)-1])
 	if err != nil {
 		return notifications.RepoSpec{}, 0, err
 	}
