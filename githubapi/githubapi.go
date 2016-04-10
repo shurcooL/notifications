@@ -10,8 +10,8 @@ import (
 	"strings"
 
 	"github.com/google/go-github/github"
+	"github.com/shurcooL/notifications"
 	"golang.org/x/net/context"
-	"src.sourcegraph.com/apps/notifications/notifications"
 )
 
 // NewService creates a GitHub-backed notifications.Service using given GitHub client.

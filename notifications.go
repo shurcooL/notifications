@@ -1,3 +1,4 @@
+// Package notifications provides a notifications service definition.
 package notifications
 
 import (
