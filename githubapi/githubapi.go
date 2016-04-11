@@ -81,10 +81,10 @@ func (s service) List(ctx context.Context, opt interface{}) (notifications.Notif
 			switch state {
 			case "open":
 				notification.Icon = "issue-opened"
-				notification.Color = notifications.RGB{0x6c, 0xc6, 0x44}
+				notification.Color = notifications.RGB{R: 0x6c, G: 0xc6, B: 0x44}
 			case "closed":
 				notification.Icon = "issue-closed"
-				notification.Color = notifications.RGB{0xbd, 0x2c, 0x00}
+				notification.Color = notifications.RGB{R: 0xbd, G: 0x2c, B: 0x00}
 			}
 			notification.HTMLURL, err = s.getIssueURL(*n.Subject)
 			if err != nil {
@@ -98,11 +98,11 @@ func (s service) List(ctx context.Context, opt interface{}) (notifications.Notif
 			}
 			switch state {
 			case "open":
-				notification.Color = notifications.RGB{0x6c, 0xc6, 0x44}
+				notification.Color = notifications.RGB{R: 0x6c, G: 0xc6, B: 0x44}
 			case "closed":
-				notification.Color = notifications.RGB{0xbd, 0x2c, 0x00}
+				notification.Color = notifications.RGB{R: 0xbd, G: 0x2c, B: 0x00}
 			case "merged":
-				notification.Color = notifications.RGB{0x6e, 0x54, 0x94}
+				notification.Color = notifications.RGB{R: 0x6e, G: 0x54, B: 0x94}
 			}
 			notification.HTMLURL, err = s.getPullRequestURL(*n.Subject)
 			if err != nil {
