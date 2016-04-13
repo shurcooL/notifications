@@ -6,6 +6,7 @@ import (
 	"html/template"
 	"time"
 
+	"github.com/shurcooL/users"
 	"golang.org/x/net/context"
 )
 
@@ -17,13 +18,10 @@ type Service interface {
 type InternalService interface {
 	List(ctx context.Context, opt interface{}) (Notifications, error)
 	Count(ctx context.Context, opt interface{}) (uint64, error)
-
-	// TODO: This doesn't belong here; it should be factored out into a platform Users service that is provided to this service.
-	CurrentUser(ctx context.Context) (*User, error)
 }
 
 type ExternalService interface {
-	Subscribe(ctx context.Context, appID string, repo RepoSpec, threadID uint64, subscribers []UserSpec) error
+	Subscribe(ctx context.Context, appID string, repo RepoSpec, threadID uint64, subscribers []users.UserSpec) error
 
 	MarkRead(ctx context.Context, appID string, repo RepoSpec, threadID uint64) error
 

@@ -4,13 +4,13 @@ package githubapi
 import (
 	"fmt"
 	"html/template"
-	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
 
 	"github.com/google/go-github/github"
 	"github.com/shurcooL/notifications"
+	"github.com/shurcooL/users"
 	"golang.org/x/net/context"
 )
 
@@ -25,36 +25,11 @@ func NewService(client *github.Client) notifications.Service {
 		cl: client,
 	}
 
-	if user, _, err := client.Users.Get(""); err == nil {
-		u := ghUser(user)
-		s.currentUser = &u
-		s.currentUserErr = nil
-	} else if ghErr, ok := err.(*github.ErrorResponse); ok && ghErr.Response.StatusCode == http.StatusUnauthorized {
-		// There's no authenticated user.
-		s.currentUser = nil
-		s.currentUserErr = nil
-	} else {
-		s.currentUser = nil
-		s.currentUserErr = err
-	}
-
 	return s
 }
 
 type service struct {
 	cl *github.Client
-
-	currentUser    *notifications.User
-	currentUserErr error
-}
-
-func (s service) CurrentUser(_ context.Context) (*notifications.User, error) {
-	return s.currentUser, s.currentUserErr
-}
-
-type repoSpec struct {
-	Owner string
-	Repo  string
 }
 
 func (s service) List(ctx context.Context, opt interface{}) (notifications.Notifications, error) {
@@ -153,7 +128,7 @@ func (s service) Notify(ctx context.Context, appID string, repo notifications.Re
 	return nil
 }
 
-func (s service) Subscribe(ctx context.Context, appID string, repo notifications.RepoSpec, threadID uint64, subscribers []notifications.UserSpec) error {
+func (s service) Subscribe(ctx context.Context, appID string, repo notifications.RepoSpec, threadID uint64, subscribers []users.UserSpec) error {
 	// Nothing to do. GitHub takes care of this on their end, even when creating comments/issues via API.
 	return nil
 }
@@ -268,6 +243,11 @@ func parseIssueCommentSpec(issueAPIURL string) (notifications.RepoSpec, int, err
 	return notifications.RepoSpec{URI: e[len(e)-5] + "/" + e[len(e)-4]}, id, nil
 }
 
+type repoSpec struct {
+	Owner string
+	Repo  string
+}
+
 func ghRepoSpec(repo notifications.RepoSpec) repoSpec {
 	ownerRepo := strings.Split(repo.URI, "/")
 	if len(ownerRepo) != 2 {
@@ -279,9 +259,9 @@ func ghRepoSpec(repo notifications.RepoSpec) repoSpec {
 	}
 }
 
-func ghUser(user *github.User) notifications.User {
-	return notifications.User{
-		UserSpec: notifications.UserSpec{
+func ghUser(user *github.User) users.User {
+	return users.User{
+		UserSpec: users.UserSpec{
 			ID:     uint64(*user.ID),
 			Domain: "github.com",
 		},
