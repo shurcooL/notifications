@@ -10,16 +10,19 @@ import (
 	"golang.org/x/net/context"
 )
 
+// Service for notifications.
 type Service interface {
 	InternalService
 	ExternalService
 }
 
+// InternalService for notifications.
 type InternalService interface {
 	List(ctx context.Context, opt interface{}) (Notifications, error)
 	Count(ctx context.Context, opt interface{}) (uint64, error)
 }
 
+// ExternalService for notifications.
 type ExternalService interface {
 	Subscribe(ctx context.Context, appID string, repo RepoSpec, threadID uint64, subscribers []users.UserSpec) error
 
@@ -28,6 +31,7 @@ type ExternalService interface {
 	Notify(ctx context.Context, appID string, repo RepoSpec, threadID uint64, notification Notification) error
 }
 
+// Notification represents a notification.
 type Notification struct {
 	RepoSpec  RepoSpec
 	RepoURL   template.URL
