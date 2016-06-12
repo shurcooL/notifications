@@ -1,6 +1,8 @@
 package notifications
 
 // TODO: Consider best (centralized?) place for RepoSpec?
+//       Also consider replacing it with `RepoURI string`.
+//       Also consider interface { RepoSpec() string }.
 
 // RepoSpec is a specification for a repository.
 type RepoSpec struct {
