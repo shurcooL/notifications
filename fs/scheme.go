@@ -32,7 +32,7 @@ func marshalUserSpec(us users.UserSpec) string {
 func unmarshalUserSpec(userSpec string) (users.UserSpec, error) {
 	parts := strings.SplitN(userSpec, "@", 2)
 	if len(parts) != 2 {
-		return users.UserSpec{}, fmt.Errorf("user spec is not 2 parts:", len(parts))
+		return users.UserSpec{}, fmt.Errorf("user spec is not 2 parts: %v", len(parts))
 	}
 	id, err := strconv.ParseUint(parts[0], 10, 64)
 	if err != nil {
