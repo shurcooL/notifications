@@ -78,7 +78,7 @@ func (s service) Count(ctx context.Context, opt interface{}) (uint64, error) {
 	return uint64(len(notifications)), nil
 }
 
-func (s service) Notify(ctx context.Context, appID string, repo notifications.RepoSpec, threadID uint64, op notifications.Notification) error {
+func (s service) Notify(ctx context.Context, appID string, repo notifications.RepoSpec, threadID uint64, op notifications.NotificationRequest) error {
 	currentUser, err := s.users.GetAuthenticatedSpec(ctx)
 	if err != nil {
 		return err

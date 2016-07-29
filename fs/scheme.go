@@ -52,6 +52,7 @@ func (o octiconID) OcticonID() notifications.OcticonID {
 	return notifications.OcticonID(o)
 }
 
+// rgb is an on-disk representation of notifications.RGB.
 type rgb struct {
 	R, G, B uint8
 }

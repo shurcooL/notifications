@@ -123,7 +123,7 @@ func (s service) MarkRead(ctx context.Context, appID string, rs notifications.Re
 	return nil
 }
 
-func (s service) Notify(ctx context.Context, appID string, repo notifications.RepoSpec, threadID uint64, op notifications.Notification) error {
+func (s service) Notify(ctx context.Context, appID string, repo notifications.RepoSpec, threadID uint64, op notifications.NotificationRequest) error {
 	// Nothing to do. GitHub takes care of this on their end, even when creating comments/issues via API.
 	return nil
 }

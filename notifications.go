@@ -28,7 +28,7 @@ type ExternalService interface {
 
 	MarkRead(ctx context.Context, appID string, repo RepoSpec, threadID uint64) error
 
-	Notify(ctx context.Context, appID string, repo RepoSpec, threadID uint64, notification Notification) error
+	Notify(ctx context.Context, appID string, repo RepoSpec, threadID uint64, notification NotificationRequest) error
 }
 
 // Notification represents a notification.
@@ -42,6 +42,15 @@ type Notification struct {
 	HTMLURL   template.URL // Address of notification target.
 }
 
+// NotificationRequest represents a request to create a notification.
+type NotificationRequest struct {
+	Title     string
+	Icon      OcticonID
+	Color     RGB
+	UpdatedAt time.Time    // TODO: Maybe not needed? Why not use time.Now()?
+	HTMLURL   template.URL // Address of notification target.
+}
+
 // Octicon ID. E.g., "issue-opened".
 type OcticonID string
 
@@ -50,8 +59,8 @@ type RGB struct {
 	R, G, B uint8
 }
 
-// Hex returns a hexadecimal color string. For example, "#ff0000" for red.
-func (c RGB) Hex() string {
+// HexString returns a hexadecimal color string. For example, "#ff0000" for red.
+func (c RGB) HexString() string {
 	return fmt.Sprintf("#%02x%02x%02x", c.R, c.G, c.B)
 }
 
