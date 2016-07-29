@@ -83,7 +83,9 @@ func (s service) Notify(ctx context.Context, appID string, repo notifications.Re
 	if err != nil {
 		return err
 	}
-	// TODO: Shouldn't we check if currentUser.ID == 0 here?
+	if currentUser.ID == 0 {
+		return os.ErrPermission
+	}
 
 	fis, err := vfsutil.ReadDir(s.fs, subscribersDir(repo, appID, threadID))
 	if os.IsNotExist(err) {
