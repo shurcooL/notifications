@@ -28,7 +28,7 @@ type ExternalService interface {
 
 	MarkRead(ctx context.Context, appID string, repo RepoSpec, threadID uint64) error
 
-	Notify(ctx context.Context, appID string, repo RepoSpec, threadID uint64, notification NotificationRequest) error
+	Notify(ctx context.Context, appID string, repo RepoSpec, threadID uint64, nr NotificationRequest) error
 }
 
 // Notification represents a notification.
@@ -36,7 +36,7 @@ type Notification struct {
 	RepoSpec  RepoSpec
 	RepoURL   template.URL
 	Title     string
-	Icon      OcticonID
+	Icon      OcticonID // TODO: Some notifications can exist for a long time. OcticonID may change when frontend updates to newer versions of octicons. Think of a better long term solution?
 	Color     RGB
 	UpdatedAt time.Time
 	HTMLURL   template.URL // Address of notification target.

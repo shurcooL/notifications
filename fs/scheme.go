@@ -96,9 +96,6 @@ func notificationPath(user users.UserSpec, key string) string {
 }
 
 func notificationKey(repo notifications.RepoSpec, appID string, threadID uint64) string {
-	if fmt.Sprintf("%s-%s-%d", repo.URI, appID, threadID) != repo.URI+"-"+appID+"-"+formatUint64(threadID) {
-		panic("mismatch")
-	}
 	// TODO: Think about repo.URI replacement of "/" -> "-", is it optimal?
 	return fmt.Sprintf("%s-%s-%d", strings.Replace(repo.URI, "/", "-", -1), appID, threadID)
 }

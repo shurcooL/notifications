@@ -3,8 +3,8 @@ package fs
 
 import (
 	"fmt"
+	"html/template"
 	"os"
-	"strconv"
 
 	"github.com/shurcooL/notifications"
 	"github.com/shurcooL/users"
@@ -39,7 +39,9 @@ func (s service) List(ctx context.Context, opt interface{}) (notifications.Notif
 
 	var ns notifications.Notifications
 	fis, err := vfsutil.ReadDir(s.fs, notificationsDir(currentUser))
-	if err != nil {
+	if os.IsNotExist(err) {
+		fis = nil
+	} else if err != nil {
 		return nil, err
 	}
 	for _, fi := range fis {
@@ -50,6 +52,7 @@ func (s service) List(ctx context.Context, opt interface{}) (notifications.Notif
 		}
 		ns = append(ns, notifications.Notification{
 			RepoSpec:  n.RepoSpec.RepoSpec(),
+			RepoURL:   template.URL("https://" + n.RepoSpec.URI),
 			Title:     n.Title,
 			Icon:      n.Icon.OcticonID(),
 			Color:     n.Color.RGB(),
@@ -72,13 +75,15 @@ func (s service) Count(ctx context.Context, opt interface{}) (uint64, error) {
 
 	// TODO: Consider reading/parsing entries, in case there's .DS_Store, etc., that should be skipped?
 	notifications, err := vfsutil.ReadDir(s.fs, notificationsDir(currentUser))
-	if err != nil {
+	if os.IsNotExist(err) {
+		notifications = nil
+	} else if err != nil {
 		return 0, err
 	}
 	return uint64(len(notifications)), nil
 }
 
-func (s service) Notify(ctx context.Context, appID string, repo notifications.RepoSpec, threadID uint64, op notifications.NotificationRequest) error {
+func (s service) Notify(ctx context.Context, appID string, repo notifications.RepoSpec, threadID uint64, nr notifications.NotificationRequest) error {
 	currentUser, err := s.users.GetAuthenticatedSpec(ctx)
 	if err != nil {
 		return err
@@ -89,7 +94,7 @@ func (s service) Notify(ctx context.Context, appID string, repo notifications.Re
 
 	fis, err := vfsutil.ReadDir(s.fs, subscribersDir(repo, appID, threadID))
 	if os.IsNotExist(err) {
-		return nil
+		fis = nil
 	} else if err != nil {
 		return err
 	}
@@ -100,20 +105,23 @@ func (s service) Notify(ctx context.Context, appID string, repo notifications.Re
 		}
 
 		if currentUser.ID != 0 && subscriber == currentUser {
-			// TODO: Remove this.
-			//fmt.Println("DEBUG: not skipping own user, notifying them anyway (for testing)!")
-
 			// Don't notify user of his own actions.
 			continue
 		}
 
+		// Create notificationsDir for subscriber in case it doesn't already exist.
+		err = s.fs.Mkdir(notificationsDir(subscriber), 0755)
+		if err != nil && !os.IsExist(err) {
+			return err
+		}
+
 		n := notification{
 			RepoSpec:  fromRepoSpec(repo),
-			Title:     op.Title,
-			HTMLURL:   op.HTMLURL,
-			UpdatedAt: op.UpdatedAt,
-			Icon:      fromOcticonID(op.Icon),
-			Color:     fromRGB(op.Color),
+			Title:     nr.Title,
+			HTMLURL:   nr.HTMLURL,
+			UpdatedAt: nr.UpdatedAt,
+			Icon:      fromOcticonID(nr.Icon),
+			Color:     fromRGB(nr.Color),
 		}
 		err = jsonEncodeFile(s.fs, notificationPath(subscriber, notificationKey(repo, appID, threadID)), n)
 		// TODO: Maybe in future read previous value, and use it to preserve some fields, like earliest HTML URL.
@@ -159,8 +167,17 @@ func (s service) MarkRead(ctx context.Context, appID string, repo notifications.
 	if err != nil {
 		return err
 	}
+	// THINK: Consider using the dir-less vfs abstraction for doing this implicitly? Less code here.
+	// If the user has no more notifications left, remove their empty directory.
+	switch notifications, err := vfsutil.ReadDir(s.fs, notificationsDir(currentUser)); {
+	case err != nil && !os.IsNotExist(err):
+		return err
+	case err == nil && len(notifications) == 0:
+		err := s.fs.RemoveAll(notificationsDir(currentUser))
+		if err != nil {
+			return err
+		}
+	}
 
 	return nil
 }
-
-func formatUint64(n uint64) string { return strconv.FormatUint(n, 10) }
