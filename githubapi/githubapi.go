@@ -15,28 +15,29 @@ import (
 	"golang.org/x/net/context"
 )
 
-// NewService creates a GitHub-backed notifications.Service using given GitHub client.
+// NewService creates a GitHub-backed notifications.Service using given GitHub clients.
 // At this time it infers the current user from the client (its authentication info), and cannot be used to serve multiple users.
-func NewService(client *github.Client) notifications.Service {
-	if client == nil {
-		client = github.NewClient(nil)
+//
+// Caching can't be used for Activity.ListNotifications until GitHub API fixes the
+// odd behavior of returning 304 even when some notifications get marked as read.
+// Otherwise read notifications remain forever (until a new notification comes in).
+// That's why we need clientNoCache.
+func NewService(clientNoCache *github.Client, client *github.Client) notifications.Service {
+	return service{
+		clNoCache: clientNoCache,
+		cl:        client,
 	}
-
-	s := service{
-		cl: client,
-	}
-
-	return s
 }
 
 type service struct {
-	cl *github.Client
+	clNoCache *github.Client // TODO: Start using cache whenever possible, remove this.
+	cl        *github.Client
 }
 
 func (s service) List(ctx context.Context, opt interface{}) (notifications.Notifications, error) {
 	var ns []notifications.Notification
 
-	ghNotifications, _, err := s.cl.Activity.ListNotifications(nil)
+	ghNotifications, _, err := s.clNoCache.Activity.ListNotifications(nil)
 	if err != nil {
 		return nil, err
 	}
@@ -96,7 +97,7 @@ func (s service) List(ctx context.Context, opt interface{}) (notifications.Notif
 }
 
 func (s service) Count(ctx context.Context, opt interface{}) (uint64, error) {
-	ghNotifications, _, err := s.cl.Activity.ListNotifications(nil)
+	ghNotifications, _, err := s.clNoCache.Activity.ListNotifications(nil)
 	return uint64(len(ghNotifications)), err
 }
 
