@@ -61,7 +61,7 @@ func (s service) List(ctx context.Context, opt interface{}) (notifications.Notif
 			default:
 				notification.Icon = "issue-opened"
 			}
-			notification.HTMLURL, err = s.getIssueURL(*n.Subject)
+			notification.HTMLURL, err = getIssueURL(*n.Subject)
 			if err != nil {
 				return ns, err
 			}
@@ -75,14 +75,21 @@ func (s service) List(ctx context.Context, opt interface{}) (notifications.Notif
 			case err == nil && state == "merged":
 				notification.Color = notifications.RGB{R: 0x6e, G: 0x54, B: 0x94}
 			}
-			notification.HTMLURL, err = s.getPullRequestURL(*n.Subject)
+			notification.HTMLURL, err = getPullRequestURL(*n.Subject)
+			if err != nil {
+				return ns, err
+			}
+		case "Commit":
+			notification.Icon = "git-commit"
+			notification.Color = notifications.RGB{R: 0x76, G: 0x76, B: 0x76}
+			notification.HTMLURL, err = getCommitURL(*n.Subject)
 			if err != nil {
 				return ns, err
 			}
 		case "Release":
 			notification.Icon = "tag"
 			notification.Color = notifications.RGB{R: 0x76, G: 0x76, B: 0x76}
-			notification.HTMLURL, err = s.getReleaseURL(*n.Subject)
+			notification.HTMLURL, err = getReleaseURL(*n.Subject)
 			if err != nil {
 				return ns, err
 			}
@@ -175,7 +182,7 @@ func (s service) getPullRequestState(prAPIURL string) (string, error) {
 	}
 }
 
-func (s service) getIssueURL(n github.NotificationSubject) (template.URL, error) {
+func getIssueURL(n github.NotificationSubject) (template.URL, error) {
 	rs, issueID, err := parseIssueSpec(*n.URL)
 	if err != nil {
 		return "", err
@@ -187,7 +194,7 @@ func (s service) getIssueURL(n github.NotificationSubject) (template.URL, error)
 	return template.URL(fmt.Sprintf("https://github.com/%s/issues/%d%s", rs.URI, issueID, fragment)), nil
 }
 
-func (s service) getPullRequestURL(n github.NotificationSubject) (template.URL, error) {
+func getPullRequestURL(n github.NotificationSubject) (template.URL, error) {
 	rs, prID, err := parsePullRequestSpec(*n.URL)
 	if err != nil {
 		return "", err
@@ -199,7 +206,15 @@ func (s service) getPullRequestURL(n github.NotificationSubject) (template.URL, 
 	return template.URL(fmt.Sprintf("https://github.com/%s/pull/%d%s", rs.URI, prID, fragment)), nil
 }
 
-func (s service) getReleaseURL(n github.NotificationSubject) (template.URL, error) {
+func getCommitURL(n github.NotificationSubject) (template.URL, error) {
+	rs, commit, err := parseSpec(*n.URL, "commits")
+	if err != nil {
+		return "", err
+	}
+	return template.URL(fmt.Sprintf("https://github.com/%s/commit/%s", rs.URI, commit)), nil
+}
+
+func getReleaseURL(n github.NotificationSubject) (template.URL, error) {
 	rs, _, err := parseSpec(*n.URL, "releases")
 	if err != nil {
 		return "", err
@@ -207,31 +222,43 @@ func (s service) getReleaseURL(n github.NotificationSubject) (template.URL, erro
 	return template.URL(fmt.Sprintf("https://github.com/%s/releases/tag/%s", rs.URI, *n.Title)), nil
 }
 
-func parseIssueSpec(issueAPIURL string) (_ notifications.RepoSpec, id int, _ error) {
-	return parseSpec(issueAPIURL, "issues")
-}
-
-func parsePullRequestSpec(prAPIURL string) (_ notifications.RepoSpec, id int, _ error) {
-	return parseSpec(prAPIURL, "pulls")
-}
-
-func parseSpec(apiURL, specType string) (_ notifications.RepoSpec, id int, _ error) {
-	u, err := url.Parse(apiURL)
+func parseIssueSpec(issueAPIURL string) (_ notifications.RepoSpec, issueID int, _ error) {
+	rs, id, err := parseSpec(issueAPIURL, "issues")
 	if err != nil {
 		return notifications.RepoSpec{}, 0, err
+	}
+	issueID, err = strconv.Atoi(id)
+	if err != nil {
+		return notifications.RepoSpec{}, 0, err
+	}
+	return rs, issueID, nil
+}
+
+func parsePullRequestSpec(prAPIURL string) (_ notifications.RepoSpec, prID int, _ error) {
+	rs, id, err := parseSpec(prAPIURL, "pulls")
+	if err != nil {
+		return notifications.RepoSpec{}, 0, err
+	}
+	prID, err = strconv.Atoi(id)
+	if err != nil {
+		return notifications.RepoSpec{}, 0, err
+	}
+	return rs, prID, nil
+}
+
+func parseSpec(apiURL, specType string) (_ notifications.RepoSpec, id string, _ error) {
+	u, err := url.Parse(apiURL)
+	if err != nil {
+		return notifications.RepoSpec{}, "", err
 	}
 	e := strings.Split(u.Path, "/")
 	if len(e) < 5 {
-		return notifications.RepoSpec{}, 0, fmt.Errorf("unexpected path (too few elements): %q", u.Path)
+		return notifications.RepoSpec{}, "", fmt.Errorf("unexpected path (too few elements): %q", u.Path)
 	}
 	if got, want := e[len(e)-2], specType; got != want {
-		return notifications.RepoSpec{}, 0, fmt.Errorf("unexpected path element %q, expecting %q", got, want)
+		return notifications.RepoSpec{}, "", fmt.Errorf("unexpected path element %q, expecting %q", got, want)
 	}
-	id, err = strconv.Atoi(e[len(e)-1])
-	if err != nil {
-		return notifications.RepoSpec{}, 0, err
-	}
-	return notifications.RepoSpec{URI: e[len(e)-4] + "/" + e[len(e)-3]}, id, nil
+	return notifications.RepoSpec{URI: e[len(e)-4] + "/" + e[len(e)-3]}, e[len(e)-1], nil
 }
 
 func parseIssueCommentSpec(issueAPIURL string) (notifications.RepoSpec, int, error) {
