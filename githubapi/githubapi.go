@@ -188,7 +188,7 @@ func getIssueURL(n github.NotificationSubject) (template.URL, error) {
 		return "", err
 	}
 	var fragment string
-	if _, commentID, err := parseIssueCommentSpec(*n.LatestCommentURL); err == nil {
+	if _, commentID, err := parseCommentSpec(n.LatestCommentURL); err == nil {
 		fragment = fmt.Sprintf("#comment-%d", commentID)
 	}
 	return template.URL(fmt.Sprintf("https://github.com/%s/issues/%d%s", rs.URI, issueID, fragment)), nil
@@ -200,7 +200,7 @@ func getPullRequestURL(n github.NotificationSubject) (template.URL, error) {
 		return "", err
 	}
 	var fragment string
-	if _, commentID, err := parseIssueCommentSpec(*n.LatestCommentURL); err == nil {
+	if _, commentID, err := parseCommentSpec(n.LatestCommentURL); err == nil {
 		fragment = fmt.Sprintf("#comment-%d", commentID)
 	}
 	return template.URL(fmt.Sprintf("https://github.com/%s/pull/%d%s", rs.URI, prID, fragment)), nil
@@ -261,8 +261,13 @@ func parseSpec(apiURL, specType string) (_ notifications.RepoSpec, id string, _ 
 	return notifications.RepoSpec{URI: e[len(e)-4] + "/" + e[len(e)-3]}, e[len(e)-1], nil
 }
 
-func parseIssueCommentSpec(issueAPIURL string) (notifications.RepoSpec, int, error) {
-	u, err := url.Parse(issueAPIURL)
+func parseCommentSpec(commentURL *string) (notifications.RepoSpec, int, error) {
+	if commentURL == nil {
+		// This can happen if the event comes from a private repository
+		// and we don't have a LatestCommentURL value for it.
+		return notifications.RepoSpec{}, 0, fmt.Errorf("comment URL not present")
+	}
+	u, err := url.Parse(*commentURL)
 	if err != nil {
 		return notifications.RepoSpec{}, 0, err
 	}
