@@ -67,7 +67,9 @@ func (c rgb) RGB() notifications.RGB {
 
 // notification is an on-disk representation of notifications.Notification.
 type notification struct {
+	AppID     string // TODO: Maybe deduce appID and threadID from fi.Name() rather than adding that to encoded JSON...
 	RepoSpec  repoSpec
+	ThreadID  uint64 // TODO: Maybe deduce appID and threadID from fi.Name() rather than adding that to encoded JSON...
 	Title     string
 	Icon      octiconID
 	Color     rgb
@@ -86,6 +88,13 @@ type notification struct {
 // 	        └── path
 // 	            └── appID-threadID
 // 	                └── userSpec - blank file
+//
+// AppID is primarily needed to separate namespaces of {Repo, ThreadID}.
+// Without AppID, a notification about issue 1 in repo "a" would clash
+// with a notification of another type also with threadID 1 in repo "a".
+//
+// TODO: Consider renaming it to "ThreadType" and make it 2nd parameter,
+//       so that it's more clear. (RepoURI, ThreadType, ThreadID).
 
 func notificationsDir(user users.UserSpec) string {
 	return path.Join("notifications", marshalUserSpec(user))

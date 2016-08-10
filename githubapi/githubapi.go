@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/google/go-github/github"
 	"github.com/shurcooL/notifications"
@@ -43,6 +44,7 @@ func (s service) List(ctx context.Context, opt interface{}) (notifications.Notif
 	}
 	for _, n := range ghNotifications {
 		notification := notifications.Notification{
+			AppID:     *n.Subject.Type,
 			RepoSpec:  notifications.RepoSpec{URI: "github.com/" + *n.Repository.FullName},
 			RepoURL:   template.URL("https://github.com/" + *n.Repository.FullName),
 			Title:     *n.Subject.Title,
@@ -51,6 +53,11 @@ func (s service) List(ctx context.Context, opt interface{}) (notifications.Notif
 
 		switch *n.Subject.Type {
 		case "Issue":
+			rs, issueID, err := parseIssueSpec(*n.Subject.URL)
+			if err != nil {
+				return ns, err
+			}
+			notification.ThreadID = issueID
 			switch state, err := s.getIssueState(*n.Subject.URL); {
 			case err == nil && state == "open":
 				notification.Icon = "issue-opened"
@@ -61,11 +68,16 @@ func (s service) List(ctx context.Context, opt interface{}) (notifications.Notif
 			default:
 				notification.Icon = "issue-opened"
 			}
-			notification.HTMLURL, err = getIssueURL(*n.Subject)
+			notification.HTMLURL, err = getIssueURL(rs, issueID, n.Subject.LatestCommentURL)
 			if err != nil {
 				return ns, err
 			}
 		case "PullRequest":
+			rs, prID, err := parsePullRequestSpec(*n.Subject.URL)
+			if err != nil {
+				return ns, err
+			}
+			notification.ThreadID = prID
 			notification.Icon = "git-pull-request"
 			switch state, err := s.getPullRequestState(*n.Subject.URL); {
 			case err == nil && state == "open":
@@ -75,7 +87,7 @@ func (s service) List(ctx context.Context, opt interface{}) (notifications.Notif
 			case err == nil && state == "merged":
 				notification.Color = notifications.RGB{R: 0x6e, G: 0x54, B: 0x94}
 			}
-			notification.HTMLURL, err = getPullRequestURL(*n.Subject)
+			notification.HTMLURL, err = getPullRequestURL(rs, prID, n.Subject.LatestCommentURL)
 			if err != nil {
 				return ns, err
 			}
@@ -109,7 +121,10 @@ func (s service) Count(ctx context.Context, opt interface{}) (uint64, error) {
 }
 
 func (s service) MarkRead(ctx context.Context, appID string, rs notifications.RepoSpec, threadID uint64) error {
-	repo := ghRepoSpec(rs)
+	repo, err := ghRepoSpec(rs)
+	if err != nil {
+		return err
+	}
 	ns, _, err := s.cl.Activity.ListRepositoryNotifications(repo.Owner, repo.Repo, nil)
 	if err != nil {
 		return fmt.Errorf("failed to ListRepositoryNotifications: %v", err)
@@ -118,11 +133,23 @@ func (s service) MarkRead(ctx context.Context, appID string, rs notifications.Re
 		if *n.Subject.Type != appID {
 			continue
 		}
-		_, issueID, err := parseIssueSpec(*n.Subject.URL)
-		if err != nil {
-			return fmt.Errorf("failed to parseIssueSpec: %v", err)
+
+		var id uint64
+		switch *n.Subject.Type {
+		case "Issue":
+			_, id, err = parseIssueSpec(*n.Subject.URL)
+			if err != nil {
+				return fmt.Errorf("failed to parseIssueSpec: %v", err)
+			}
+		case "PullRequest":
+			_, id, err = parsePullRequestSpec(*n.Subject.URL)
+			if err != nil {
+				return fmt.Errorf("failed to parsePullRequestSpec: %v", err)
+			}
+		default:
+			return fmt.Errorf("MarkRead: unsupported *n.Subject.Type: %v", *n.Subject.Type)
 		}
-		if uint64(issueID) != threadID {
+		if id != threadID {
 			continue
 		}
 
@@ -131,6 +158,18 @@ func (s service) MarkRead(ctx context.Context, appID string, rs notifications.Re
 			return fmt.Errorf("failed to MarkThreadRead: %v", err)
 		}
 		break
+	}
+	return nil
+}
+
+func (s service) MarkAllRead(ctx context.Context, rs notifications.RepoSpec) error {
+	repo, err := ghRepoSpec(rs)
+	if err != nil {
+		return err
+	}
+	_, err = s.cl.Activity.MarkRepositoryNotificationsRead(repo.Owner, repo.Repo, time.Now())
+	if err != nil {
+		return fmt.Errorf("failed to MarkRepositoryNotificationsRead: %v", err)
 	}
 	return nil
 }
@@ -182,25 +221,17 @@ func (s service) getPullRequestState(prAPIURL string) (string, error) {
 	}
 }
 
-func getIssueURL(n github.NotificationSubject) (template.URL, error) {
-	rs, issueID, err := parseIssueSpec(*n.URL)
-	if err != nil {
-		return "", err
-	}
+func getIssueURL(rs notifications.RepoSpec, issueID uint64, commentURL *string) (template.URL, error) {
 	var fragment string
-	if _, commentID, err := parseCommentSpec(n.LatestCommentURL); err == nil {
+	if _, commentID, err := parseCommentSpec(commentURL); err == nil {
 		fragment = fmt.Sprintf("#comment-%d", commentID)
 	}
 	return template.URL(fmt.Sprintf("https://github.com/%s/issues/%d%s", rs.URI, issueID, fragment)), nil
 }
 
-func getPullRequestURL(n github.NotificationSubject) (template.URL, error) {
-	rs, prID, err := parsePullRequestSpec(*n.URL)
-	if err != nil {
-		return "", err
-	}
+func getPullRequestURL(rs notifications.RepoSpec, prID uint64, commentURL *string) (template.URL, error) {
 	var fragment string
-	if _, commentID, err := parseCommentSpec(n.LatestCommentURL); err == nil {
+	if _, commentID, err := parseCommentSpec(commentURL); err == nil {
 		fragment = fmt.Sprintf("#comment-%d", commentID)
 	}
 	return template.URL(fmt.Sprintf("https://github.com/%s/pull/%d%s", rs.URI, prID, fragment)), nil
@@ -227,24 +258,24 @@ func (s service) getReleaseURL(releaseAPIURL string) (template.URL, error) {
 	return template.URL(*rr.HTMLURL), nil
 }
 
-func parseIssueSpec(issueAPIURL string) (_ notifications.RepoSpec, issueID int, _ error) {
+func parseIssueSpec(issueAPIURL string) (_ notifications.RepoSpec, issueID uint64, _ error) {
 	rs, id, err := parseSpec(issueAPIURL, "issues")
 	if err != nil {
 		return notifications.RepoSpec{}, 0, err
 	}
-	issueID, err = strconv.Atoi(id)
+	issueID, err = strconv.ParseUint(id, 10, 64)
 	if err != nil {
 		return notifications.RepoSpec{}, 0, err
 	}
 	return rs, issueID, nil
 }
 
-func parsePullRequestSpec(prAPIURL string) (_ notifications.RepoSpec, prID int, _ error) {
+func parsePullRequestSpec(prAPIURL string) (_ notifications.RepoSpec, prID uint64, _ error) {
 	rs, id, err := parseSpec(prAPIURL, "pulls")
 	if err != nil {
 		return notifications.RepoSpec{}, 0, err
 	}
-	prID, err = strconv.Atoi(id)
+	prID, err = strconv.ParseUint(id, 10, 64)
 	if err != nil {
 		return notifications.RepoSpec{}, 0, err
 	}
@@ -298,15 +329,19 @@ type repoSpec struct {
 	Repo  string
 }
 
-func ghRepoSpec(repo notifications.RepoSpec) repoSpec {
-	ownerRepo := strings.Split(repo.URI, "/")
-	if len(ownerRepo) != 2 {
-		panic(fmt.Errorf(`RepoSpec is not of form "owner/repo": %v`, repo))
+func ghRepoSpec(repo notifications.RepoSpec) (repoSpec, error) {
+	// TODO, THINK: Include "github.com/" prefix or not?
+	//              So far I'm leaning towards "yes", because it's more definitive and matches
+	//              local uris that also include host. This way, the host can be checked as part of
+	//              request, rather than kept implicit.
+	ghOwnerRepo := strings.Split(repo.URI, "/")
+	if len(ghOwnerRepo) != 3 || ghOwnerRepo[0] != "github.com" || ghOwnerRepo[1] == "" || ghOwnerRepo[2] == "" {
+		return repoSpec{}, fmt.Errorf(`RepoSpec is not of form "github.com/owner/repo": %q`, repo.URI)
 	}
 	return repoSpec{
-		Owner: ownerRepo[0],
-		Repo:  ownerRepo[1],
-	}
+		Owner: ghOwnerRepo[1],
+		Repo:  ghOwnerRepo[2],
+	}, nil
 }
 
 func ghUser(user *github.User) users.User {

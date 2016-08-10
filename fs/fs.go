@@ -4,6 +4,7 @@ package fs
 import (
 	"fmt"
 	"html/template"
+	"log"
 	"os"
 
 	"github.com/shurcooL/notifications"
@@ -50,8 +51,11 @@ func (s service) List(ctx context.Context, opt interface{}) (notifications.Notif
 		if err != nil {
 			return nil, fmt.Errorf("error reading %s: %v", notificationPath(currentUser, fi.Name()), err)
 		}
+		// TODO: Maybe deduce appID and threadID from fi.Name() rather than adding that to encoded JSON...
 		ns = append(ns, notifications.Notification{
+			AppID:     n.AppID,
 			RepoSpec:  n.RepoSpec.RepoSpec(),
+			ThreadID:  n.ThreadID,
 			RepoURL:   template.URL("https://" + n.RepoSpec.URI),
 			Title:     n.Title,
 			Icon:      n.Icon.OcticonID(),
@@ -115,8 +119,11 @@ func (s service) Notify(ctx context.Context, appID string, repo notifications.Re
 			return err
 		}
 
+		// TODO: Maybe deduce appID and threadID from fi.Name() rather than adding that to encoded JSON...
 		n := notification{
+			AppID:     appID,
 			RepoSpec:  fromRepoSpec(repo),
+			ThreadID:  threadID,
 			Title:     nr.Title,
 			HTMLURL:   nr.HTMLURL,
 			UpdatedAt: nr.UpdatedAt,
@@ -167,6 +174,57 @@ func (s service) MarkRead(ctx context.Context, appID string, repo notifications.
 	if err != nil {
 		return err
 	}
+	// THINK: Consider using the dir-less vfs abstraction for doing this implicitly? Less code here.
+	// If the user has no more notifications left, remove their empty directory.
+	switch notifications, err := vfsutil.ReadDir(s.fs, notificationsDir(currentUser)); {
+	case err != nil && !os.IsNotExist(err):
+		return err
+	case err == nil && len(notifications) == 0:
+		err := s.fs.RemoveAll(notificationsDir(currentUser))
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (s service) MarkAllRead(ctx context.Context, repo notifications.RepoSpec) error {
+	currentUser, err := s.users.GetAuthenticatedSpec(ctx)
+	if err != nil {
+		return err
+	}
+	if currentUser.ID == 0 {
+		return os.ErrPermission
+	}
+
+	// Iterate all user's notifications.
+	fis, err := vfsutil.ReadDir(s.fs, notificationsDir(currentUser))
+	if os.IsNotExist(err) {
+		fis = nil
+	} else if err != nil {
+		return err
+	}
+	for _, fi := range fis {
+		var n notification
+		err := jsonDecodeFile(s.fs, notificationPath(currentUser, fi.Name()), &n)
+		if err != nil {
+			log.Printf("error reading %s: %v\n", notificationPath(currentUser, fi.Name()), err)
+			continue
+		}
+
+		// Skip notifications whose repo doesn't match.
+		if n.RepoSpec.RepoSpec() != repo {
+			continue
+		}
+
+		// TODO: Move notification instead of outright removing, maybe?
+		err = s.fs.RemoveAll(notificationPath(currentUser, notificationKey(repo, n.AppID, n.ThreadID)))
+		if err != nil {
+			return err
+		}
+	}
+
 	// THINK: Consider using the dir-less vfs abstraction for doing this implicitly? Less code here.
 	// If the user has no more notifications left, remove their empty directory.
 	switch notifications, err := vfsutil.ReadDir(s.fs, notificationsDir(currentUser)); {
