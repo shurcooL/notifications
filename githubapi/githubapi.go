@@ -89,7 +89,7 @@ func (s service) List(ctx context.Context, opt interface{}) (notifications.Notif
 		case "Release":
 			notification.Icon = "tag"
 			notification.Color = notifications.RGB{R: 0x76, G: 0x76, B: 0x76}
-			notification.HTMLURL, err = getReleaseURL(*n.Subject)
+			notification.HTMLURL, err = s.getReleaseURL(*n.Subject.URL)
 			if err != nil {
 				return ns, err
 			}
@@ -214,12 +214,17 @@ func getCommitURL(n github.NotificationSubject) (template.URL, error) {
 	return template.URL(fmt.Sprintf("https://github.com/%s/commit/%s", rs.URI, commit)), nil
 }
 
-func getReleaseURL(n github.NotificationSubject) (template.URL, error) {
-	rs, _, err := parseSpec(*n.URL, "releases")
+func (s service) getReleaseURL(releaseAPIURL string) (template.URL, error) {
+	req, err := s.cl.NewRequest("GET", releaseAPIURL, nil)
 	if err != nil {
 		return "", err
 	}
-	return template.URL(fmt.Sprintf("https://github.com/%s/releases/tag/%s", rs.URI, *n.Title)), nil
+	rr := new(github.RepositoryRelease)
+	_, err = s.cl.Do(req, rr)
+	if err != nil {
+		return "", err
+	}
+	return template.URL(*rr.HTMLURL), nil
 }
 
 func parseIssueSpec(issueAPIURL string) (_ notifications.RepoSpec, issueID int, _ error) {
