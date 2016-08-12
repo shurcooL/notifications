@@ -60,6 +60,7 @@ func (s service) List(ctx context.Context, opt interface{}) (notifications.Notif
 			Title:     n.Title,
 			Icon:      n.Icon.OcticonID(),
 			Color:     n.Color.RGB(),
+			Actor:     s.user(ctx, n.Actor.UserSpec()),
 			UpdatedAt: n.UpdatedAt,
 			HTMLURL:   n.HTMLURL,
 		})
@@ -129,6 +130,7 @@ func (s service) Notify(ctx context.Context, appID string, repo notifications.Re
 			UpdatedAt: nr.UpdatedAt,
 			Icon:      fromOcticonID(nr.Icon),
 			Color:     fromRGB(nr.Color),
+			Actor:     fromUserSpec(nr.Actor),
 		}
 		err = jsonEncodeFile(s.fs, notificationPath(subscriber, notificationKey(repo, appID, threadID)), n)
 		// TODO: Maybe in future read previous value, and use it to preserve some fields, like earliest HTML URL.
@@ -238,4 +240,17 @@ func (s service) MarkAllRead(ctx context.Context, repo notifications.RepoSpec) e
 	}
 
 	return nil
+}
+
+func (s service) user(ctx context.Context, user users.UserSpec) users.User {
+	u, err := s.users.Get(ctx, user)
+	if err != nil {
+		return users.User{
+			UserSpec:  user,
+			Login:     fmt.Sprintf("%d@%v", user.ID, user.Domain),
+			AvatarURL: "",
+			HTMLURL:   "",
+		}
+	}
+	return u
 }

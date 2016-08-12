@@ -40,6 +40,7 @@ type Notification struct {
 	Title     string
 	Icon      OcticonID // TODO: Some notifications can exist for a long time. OcticonID may change when frontend updates to newer versions of octicons. Think of a better long term solution?
 	Color     RGB
+	Actor     users.User
 	UpdatedAt time.Time
 	HTMLURL   template.URL // Address of notification target.
 }
@@ -49,8 +50,9 @@ type NotificationRequest struct {
 	Title     string
 	Icon      OcticonID
 	Color     RGB
-	UpdatedAt time.Time    // TODO: Maybe not needed? Why not use time.Now()?
-	HTMLURL   template.URL // Address of notification target.
+	Actor     users.UserSpec // Actor that triggered the notification.
+	UpdatedAt time.Time      // TODO: Maybe not needed? Why not use time.Now()?
+	HTMLURL   template.URL   // Address of notification target.
 }
 
 // Octicon ID. E.g., "issue-opened".

@@ -52,6 +52,24 @@ func (o octiconID) OcticonID() notifications.OcticonID {
 	return notifications.OcticonID(o)
 }
 
+// userSpec is an on-disk representation of users.UserSpec.
+type userSpec struct {
+	ID     uint64
+	Domain string `json:",omitempty"`
+}
+
+func fromUserSpec(us users.UserSpec) userSpec {
+	return userSpec{ID: us.ID, Domain: us.Domain}
+}
+
+func (us userSpec) UserSpec() users.UserSpec {
+	return users.UserSpec{ID: us.ID, Domain: us.Domain}
+}
+
+func (us userSpec) Equal(other users.UserSpec) bool {
+	return us.Domain == other.Domain && us.ID == other.ID
+}
+
 // rgb is an on-disk representation of notifications.RGB.
 type rgb struct {
 	R, G, B uint8
@@ -73,6 +91,7 @@ type notification struct {
 	Title     string
 	Icon      octiconID
 	Color     rgb
+	Actor     userSpec
 	UpdatedAt time.Time
 	HTMLURL   template.URL
 }
