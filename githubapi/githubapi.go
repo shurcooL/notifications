@@ -379,7 +379,19 @@ func ghUser(user *github.User) users.User {
 			Domain: "github.com",
 		},
 		Login:     *user.Login,
-		AvatarURL: template.URL(*user.AvatarURL),
+		AvatarURL: template.URL(avatarURLSize(*user.AvatarURL, 36)),
 		HTMLURL:   template.URL(*user.HTMLURL),
 	}
+}
+
+// avatarURLSize takes avatarURL and sets its "s" query parameter to size.
+func avatarURLSize(avatarURL string, size int) string {
+	u, err := url.Parse(avatarURL)
+	if err != nil {
+		return avatarURL
+	}
+	q := u.Query()
+	q.Set("s", fmt.Sprint(size))
+	u.RawQuery = q.Encode()
+	return u.String()
 }

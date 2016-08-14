@@ -20,3 +20,11 @@ func TestGetCommitURL(t *testing.T) {
 		t.Errorf("got %q, want %q", got, want)
 	}
 }
+
+func TestAvatarURLSize(t *testing.T) {
+	got := avatarURLSize("https://avatars.githubusercontent.com/u/12345?v=3", 36)
+	want := "https://avatars.githubusercontent.com/u/12345?s=36&v=3"
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
