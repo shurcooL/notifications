@@ -189,8 +189,8 @@ func (s service) Subscribe(ctx context.Context, appID string, repo notifications
 }
 
 // getNotificationActor tries to follow the LatestCommentURL, if not-nil,
-// to fetch an object that hopefully contains a User. That User is taken
-// to be the actor that triggered the notification.
+// to fetch an object that contains a User or Author, who is taken to be
+// the actor that triggered the notification.
 func (s service) getNotificationActor(latestCommentURL *string) (users.User, error) {
 	if latestCommentURL == nil {
 		// This can happen if the event comes from a private repository
@@ -201,15 +201,22 @@ func (s service) getNotificationActor(latestCommentURL *string) (users.User, err
 	if err != nil {
 		return users.User{}, err
 	}
-	n := new(struct{ User *github.User })
+	n := new(struct {
+		User   *github.User
+		Author *github.User
+	})
 	_, err = s.cl.Do(req, n)
 	if err != nil {
 		return users.User{}, err
 	}
-	if n.User == nil {
-		return users.User{}, fmt.Errorf("for some reason User is nil for %q: %v", *latestCommentURL, n)
+	if n.User != nil {
+		return ghUser(n.User), nil
+	} else if n.Author != nil {
+		// Author is used as fallback, if User isn't present. It can happen on releases, etc.
+		return ghUser(n.Author), nil
+	} else {
+		return users.User{}, fmt.Errorf("both User and Author are nil for %q: %v", *latestCommentURL, n)
 	}
-	return ghUser(n.User), nil
 }
 
 func (s service) getIssueState(issueAPIURL string) (string, error) {
