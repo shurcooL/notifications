@@ -247,7 +247,7 @@ func (s service) user(ctx context.Context, user users.UserSpec) users.User {
 	if err != nil {
 		return users.User{
 			UserSpec:  user,
-			Login:     fmt.Sprintf("%d@%v", user.ID, user.Domain),
+			Login:     fmt.Sprintf("%d@%s", user.ID, user.Domain),
 			AvatarURL: "",
 			HTMLURL:   "",
 		}
