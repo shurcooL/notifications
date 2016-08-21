@@ -51,7 +51,7 @@ func (s service) List(ctx context.Context, opt interface{}) (notifications.Notif
 			UpdatedAt: *n.UpdatedAt,
 		}
 
-		if actor, err := s.getNotificationActor(n.Subject.LatestCommentURL); err == nil {
+		if actor, err := s.getNotificationActor(*n.Subject); err == nil {
 			notification.Actor = actor
 		}
 
@@ -191,13 +191,19 @@ func (s service) Subscribe(ctx context.Context, appID string, repo notifications
 // getNotificationActor tries to follow the LatestCommentURL, if not-nil,
 // to fetch an object that contains a User or Author, who is taken to be
 // the actor that triggered the notification.
-func (s service) getNotificationActor(latestCommentURL *string) (users.User, error) {
-	if latestCommentURL == nil {
+func (s service) getNotificationActor(subject github.NotificationSubject) (users.User, error) {
+	var apiURL string
+	if subject.LatestCommentURL != nil {
+		apiURL = *subject.LatestCommentURL
+	} else if subject.URL != nil {
+		// URL is used as fallback, if LatestCommentURL isn't present. It can happen for inline comments on PRs, etc.
+		apiURL = *subject.URL
+	} else {
 		// This can happen if the event comes from a private repository
-		// and we don't have a LatestCommentURL value for it.
-		return users.User{}, fmt.Errorf("latest comment URL not present")
+		// and we don't have any API URL values for it.
+		return users.User{}, fmt.Errorf("subject API URLs not present")
 	}
-	req, err := s.cl.NewRequest("GET", *latestCommentURL, nil)
+	req, err := s.cl.NewRequest("GET", apiURL, nil)
 	if err != nil {
 		return users.User{}, err
 	}
@@ -215,7 +221,7 @@ func (s service) getNotificationActor(latestCommentURL *string) (users.User, err
 		// Author is used as fallback, if User isn't present. It can happen on releases, etc.
 		return ghUser(n.Author), nil
 	} else {
-		return users.User{}, fmt.Errorf("both User and Author are nil for %q: %v", *latestCommentURL, n)
+		return users.User{}, fmt.Errorf("both User and Author are nil for %q: %v", apiURL, n)
 	}
 }
 
@@ -272,8 +278,8 @@ func getPullRequestURL(rs notifications.RepoSpec, prID uint64, commentURL *strin
 	return template.URL(fmt.Sprintf("https://github.com/%s/pull/%d%s", rs.URI, prID, fragment)), nil
 }
 
-func getCommitURL(n github.NotificationSubject) (template.URL, error) {
-	rs, commit, err := parseSpec(*n.URL, "commits")
+func getCommitURL(subject github.NotificationSubject) (template.URL, error) {
+	rs, commit, err := parseSpec(*subject.URL, "commits")
 	if err != nil {
 		return "", err
 	}
