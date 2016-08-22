@@ -2,12 +2,12 @@
 package notifications
 
 import (
+	"context"
 	"fmt"
 	"html/template"
 	"time"
 
 	"github.com/shurcooL/users"
-	"golang.org/x/net/context"
 )
 
 // Service for notifications.

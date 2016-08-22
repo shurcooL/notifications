@@ -2,6 +2,7 @@
 package fs
 
 import (
+	"context"
 	"fmt"
 	"html/template"
 	"log"
@@ -10,7 +11,6 @@ import (
 	"github.com/shurcooL/notifications"
 	"github.com/shurcooL/users"
 	"github.com/shurcooL/webdavfs/vfsutil"
-	"golang.org/x/net/context"
 	"golang.org/x/net/webdav"
 )
 

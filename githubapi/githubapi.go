@@ -2,6 +2,7 @@
 package githubapi
 
 import (
+	"context"
 	"fmt"
 	"html/template"
 	"log"
@@ -13,7 +14,6 @@ import (
 	"github.com/google/go-github/github"
 	"github.com/shurcooL/notifications"
 	"github.com/shurcooL/users"
-	"golang.org/x/net/context"
 )
 
 // NewService creates a GitHub-backed notifications.Service using given GitHub clients.
