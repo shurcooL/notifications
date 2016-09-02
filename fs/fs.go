@@ -29,7 +29,7 @@ type service struct {
 	users users.Service
 }
 
-func (s service) List(ctx context.Context, opt interface{}) (notifications.Notifications, error) {
+func (s service) List(ctx context.Context, opt notifications.ListOptions) (notifications.Notifications, error) {
 	currentUser, err := s.users.GetAuthenticatedSpec(ctx)
 	if err != nil {
 		return nil, err
@@ -51,6 +51,11 @@ func (s service) List(ctx context.Context, opt interface{}) (notifications.Notif
 		if err != nil {
 			return nil, fmt.Errorf("error reading %s: %v", notificationPath(currentUser, fi.Name()), err)
 		}
+
+		if opt.Repo != nil && n.RepoSpec.RepoSpec() != *opt.Repo {
+			continue
+		}
+
 		// TODO: Maybe deduce appID and threadID from fi.Name() rather than adding that to encoded JSON...
 		ns = append(ns, notifications.Notification{
 			AppID:     n.AppID,

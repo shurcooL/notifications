@@ -12,7 +12,7 @@ import (
 
 // Service for notifications.
 type Service interface {
-	List(ctx context.Context, opt interface{}) (Notifications, error)
+	List(ctx context.Context, opt ListOptions) (Notifications, error)
 	Count(ctx context.Context, opt interface{}) (uint64, error)
 
 	// MarkAllRead marks all notifications in the specified repository as read.
@@ -31,9 +31,15 @@ type ExternalService interface {
 	Notify(ctx context.Context, appID string, repo RepoSpec, threadID uint64, nr NotificationRequest) error
 }
 
+// ListOptions are options for List operation.
+type ListOptions struct {
+	// Repo is an optional filter. If not nil, only notifications from Repo will be listed.
+	Repo *RepoSpec
+}
+
 // Notification represents a notification.
 type Notification struct {
-	AppID     string
+	AppID     string // TODO: Rename AppID to "ThreadType" and shuffle its order to make it more clear: (RepoURI, ThreadType, ThreadID).
 	RepoSpec  RepoSpec
 	ThreadID  uint64
 	RepoURL   template.URL

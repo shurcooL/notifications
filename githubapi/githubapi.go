@@ -35,12 +35,26 @@ type service struct {
 	cl        *github.Client
 }
 
-func (s service) List(ctx context.Context, opt interface{}) (notifications.Notifications, error) {
+func (s service) List(ctx context.Context, opt notifications.ListOptions) (notifications.Notifications, error) {
 	var ns []notifications.Notification
 
-	ghNotifications, _, err := s.clNoCache.Activity.ListNotifications(nil)
-	if err != nil {
-		return nil, err
+	var ghNotifications []*github.Notification
+	switch opt.Repo {
+	case nil:
+		var err error
+		ghNotifications, _, err = s.clNoCache.Activity.ListNotifications(nil)
+		if err != nil {
+			return nil, err
+		}
+	default:
+		repo, err := ghRepoSpec(*opt.Repo)
+		if err != nil {
+			return nil, err
+		}
+		ghNotifications, _, err = s.clNoCache.Activity.ListRepositoryNotifications(repo.Owner, repo.Repo, nil)
+		if err != nil {
+			return nil, err
+		}
 	}
 	for _, n := range ghNotifications {
 		notification := notifications.Notification{
@@ -98,6 +112,7 @@ func (s service) List(ctx context.Context, opt interface{}) (notifications.Notif
 		case "Commit":
 			notification.Icon = "git-commit"
 			notification.Color = notifications.RGB{R: 0x76, G: 0x76, B: 0x76}
+			var err error
 			notification.HTMLURL, err = getCommitURL(*n.Subject)
 			if err != nil {
 				return ns, err
@@ -105,6 +120,7 @@ func (s service) List(ctx context.Context, opt interface{}) (notifications.Notif
 		case "Release":
 			notification.Icon = "tag"
 			notification.Color = notifications.RGB{R: 0x76, G: 0x76, B: 0x76}
+			var err error
 			notification.HTMLURL, err = s.getReleaseURL(*n.Subject.URL)
 			if err != nil {
 				return ns, err
