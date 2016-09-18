@@ -15,9 +15,8 @@ func jsonEncodeFile(fs webdav.FileSystem, path string, v interface{}) error {
 	if err != nil {
 		return err
 	}
-	err = json.NewEncoder(f).Encode(v)
-	_ = f.Close()
-	return err
+	defer f.Close()
+	return json.NewEncoder(f).Encode(v)
 }
 
 // jsonDecodeFile decodes contents of file at path into v.
@@ -26,9 +25,8 @@ func jsonDecodeFile(fs webdav.FileSystem, path string, v interface{}) error {
 	if err != nil {
 		return err
 	}
-	err = json.NewDecoder(f).Decode(v)
-	_ = f.Close()
-	return err
+	defer f.Close()
+	return json.NewDecoder(f).Decode(v)
 }
 
 // createEmptyFile creates an empty file at path, creating parent directories if needed.
