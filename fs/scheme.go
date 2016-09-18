@@ -18,11 +18,11 @@ type repoSpec struct {
 }
 
 func fromRepoSpec(rs notifications.RepoSpec) repoSpec {
-	return repoSpec{URI: rs.URI}
+	return repoSpec(rs)
 }
 
 func (rs repoSpec) RepoSpec() notifications.RepoSpec {
-	return notifications.RepoSpec{URI: rs.URI}
+	return notifications.RepoSpec(rs)
 }
 
 func marshalUserSpec(us users.UserSpec) string {
@@ -76,11 +76,11 @@ type rgb struct {
 }
 
 func fromRGB(c notifications.RGB) rgb {
-	return rgb{R: c.R, G: c.G, B: c.B}
+	return rgb(c)
 }
 
 func (c rgb) RGB() notifications.RGB {
-	return notifications.RGB{R: c.R, G: c.G, B: c.B}
+	return notifications.RGB(c)
 }
 
 // notification is an on-disk representation of notifications.Notification.
