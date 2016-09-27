@@ -79,10 +79,10 @@ func (s service) List(ctx context.Context, opt notifications.ListOptions) (notif
 			switch state, err := s.getIssueState(*n.Subject.URL); {
 			case err == nil && state == "open":
 				notification.Icon = "issue-opened"
-				notification.Color = notifications.RGB{R: 0x6c, G: 0xc6, B: 0x44}
+				notification.Color = notifications.RGB{R: 0x6c, G: 0xc6, B: 0x44} // Green.
 			case err == nil && state == "closed":
 				notification.Icon = "issue-closed"
-				notification.Color = notifications.RGB{R: 0xbd, G: 0x2c, B: 0x00}
+				notification.Color = notifications.RGB{R: 0xbd, G: 0x2c, B: 0x00} // Red.
 			default:
 				notification.Icon = "issue-opened"
 			}
@@ -99,11 +99,11 @@ func (s service) List(ctx context.Context, opt notifications.ListOptions) (notif
 			notification.Icon = "git-pull-request"
 			switch state, err := s.getPullRequestState(*n.Subject.URL); {
 			case err == nil && state == "open":
-				notification.Color = notifications.RGB{R: 0x6c, G: 0xc6, B: 0x44}
+				notification.Color = notifications.RGB{R: 0x6c, G: 0xc6, B: 0x44} // Green.
 			case err == nil && state == "closed":
-				notification.Color = notifications.RGB{R: 0xbd, G: 0x2c, B: 0x00}
+				notification.Color = notifications.RGB{R: 0xbd, G: 0x2c, B: 0x00} // Red.
 			case err == nil && state == "merged":
-				notification.Color = notifications.RGB{R: 0x6e, G: 0x54, B: 0x94}
+				notification.Color = notifications.RGB{R: 0x6e, G: 0x54, B: 0x94} // Purple.
 			}
 			notification.HTMLURL, err = getPullRequestURL(rs, prID, n.Subject.LatestCommentURL)
 			if err != nil {
@@ -111,7 +111,7 @@ func (s service) List(ctx context.Context, opt notifications.ListOptions) (notif
 			}
 		case "Commit":
 			notification.Icon = "git-commit"
-			notification.Color = notifications.RGB{R: 0x76, G: 0x76, B: 0x76}
+			notification.Color = notifications.RGB{R: 0x76, G: 0x76, B: 0x76} // Gray.
 			var err error
 			notification.HTMLURL, err = getCommitURL(*n.Subject)
 			if err != nil {
@@ -119,12 +119,16 @@ func (s service) List(ctx context.Context, opt notifications.ListOptions) (notif
 			}
 		case "Release":
 			notification.Icon = "tag"
-			notification.Color = notifications.RGB{R: 0x76, G: 0x76, B: 0x76}
+			notification.Color = notifications.RGB{R: 0x76, G: 0x76, B: 0x76} // Gray.
 			var err error
 			notification.HTMLURL, err = s.getReleaseURL(*n.Subject.URL)
 			if err != nil {
 				return ns, err
 			}
+		case "RepositoryInvitation":
+			notification.Icon = "mail"
+			notification.Color = notifications.RGB{R: 0x76, G: 0x76, B: 0x76} // Gray.
+			notification.HTMLURL = template.URL("https://github.com/" + *n.Repository.FullName + "/invitations")
 		default:
 			log.Printf("unsupported *n.Subject.Type: %q\n", *n.Subject.Type)
 		}
