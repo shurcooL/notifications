@@ -102,18 +102,43 @@ func (s service) Notify(ctx context.Context, appID string, repo notifications.Re
 		return os.ErrPermission
 	}
 
-	fis, err := vfsutil.ReadDir(s.fs, subscribersDir(repo, appID, threadID))
+	var subscribers = make(map[users.UserSpec]struct{})
+
+	fis, err := vfsutil.ReadDir(s.fs, subscribersDir(repo, appID, threadID)) // Thread subscribers.
 	if os.IsNotExist(err) {
 		fis = nil
 	} else if err != nil {
 		return err
 	}
 	for _, fi := range fis {
+		if fi.IsDir() {
+			continue
+		}
 		subscriber, err := unmarshalUserSpec(fi.Name())
 		if err != nil {
 			continue
 		}
+		subscribers[subscriber] = struct{}{}
+	}
 
+	fis, err = vfsutil.ReadDir(s.fs, subscribersDir(repo, "", 0)) // Repo watchers.
+	if os.IsNotExist(err) {
+		fis = nil
+	} else if err != nil {
+		return err
+	}
+	for _, fi := range fis {
+		if fi.IsDir() {
+			continue
+		}
+		subscriber, err := unmarshalUserSpec(fi.Name())
+		if err != nil {
+			continue
+		}
+		subscribers[subscriber] = struct{}{}
+	}
+
+	for subscriber := range subscribers {
 		if currentUser.ID != 0 && subscriber == currentUser {
 			// Don't notify user of his own actions.
 			continue

@@ -105,8 +105,9 @@ type notification struct {
 // 	└── subscribers
 // 	    └── domain.com
 // 	        └── path
-// 	            └── appID-threadID
-// 	                └── userSpec - blank file
+// 	            ├── appID-threadID
+// 	            │   └── userSpec - blank file
+// 	            └── userSpec - blank file
 //
 // AppID is primarily needed to separate namespaces of {Repo, ThreadID}.
 // Without AppID, a notification about issue 1 in repo "a" would clash
@@ -120,7 +121,7 @@ func notificationsDir(user users.UserSpec) string {
 }
 
 func notificationPath(user users.UserSpec, key string) string {
-	return path.Join("notifications", marshalUserSpec(user), key)
+	return path.Join(notificationsDir(user), key)
 }
 
 func notificationKey(repo notifications.RepoSpec, appID string, threadID uint64) string {
@@ -129,11 +130,16 @@ func notificationKey(repo notifications.RepoSpec, appID string, threadID uint64)
 }
 
 func subscribersDir(repo notifications.RepoSpec, appID string, threadID uint64) string {
-	return path.Join("subscribers", repo.URI, fmt.Sprintf("%s-%d", appID, threadID))
+	switch {
+	default:
+		return path.Join("subscribers", repo.URI, fmt.Sprintf("%s-%d", appID, threadID))
+	case appID == "" && threadID == 0:
+		return path.Join("subscribers", repo.URI)
+	}
 }
 
 func subscriberPath(repo notifications.RepoSpec, appID string, threadID uint64, subscriber users.UserSpec) string {
-	return path.Join("subscribers", repo.URI, fmt.Sprintf("%s-%d", appID, threadID), marshalUserSpec(subscriber))
+	return path.Join(subscribersDir(repo, appID, threadID), marshalUserSpec(subscriber))
 }
 
 // TODO: Sort out userSpec.
