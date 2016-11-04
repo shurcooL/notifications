@@ -145,7 +145,7 @@ func (s service) Notify(ctx context.Context, appID string, repo notifications.Re
 		}
 
 		// Create notificationsDir for subscriber in case it doesn't already exist.
-		err = s.fs.Mkdir(notificationsDir(subscriber), 0755)
+		err = s.fs.Mkdir(ctx, notificationsDir(subscriber), 0755)
 		if err != nil && !os.IsExist(err) {
 			return err
 		}
@@ -202,7 +202,7 @@ func (s service) MarkRead(ctx context.Context, appID string, repo notifications.
 	}
 
 	// TODO: Move notification instead of outright removing, maybe?
-	err = s.fs.RemoveAll(notificationPath(currentUser, notificationKey(repo, appID, threadID)))
+	err = s.fs.RemoveAll(ctx, notificationPath(currentUser, notificationKey(repo, appID, threadID)))
 	if err != nil {
 		return err
 	}
@@ -212,7 +212,7 @@ func (s service) MarkRead(ctx context.Context, appID string, repo notifications.
 	case err != nil && !os.IsNotExist(err):
 		return err
 	case err == nil && len(notifications) == 0:
-		err := s.fs.RemoveAll(notificationsDir(currentUser))
+		err := s.fs.RemoveAll(ctx, notificationsDir(currentUser))
 		if err != nil {
 			return err
 		}
@@ -251,7 +251,7 @@ func (s service) MarkAllRead(ctx context.Context, repo notifications.RepoSpec) e
 		}
 
 		// TODO: Move notification instead of outright removing, maybe?
-		err = s.fs.RemoveAll(notificationPath(currentUser, notificationKey(repo, n.AppID, n.ThreadID)))
+		err = s.fs.RemoveAll(ctx, notificationPath(currentUser, notificationKey(repo, n.AppID, n.ThreadID)))
 		if err != nil {
 			return err
 		}
@@ -263,7 +263,7 @@ func (s service) MarkAllRead(ctx context.Context, repo notifications.RepoSpec) e
 	case err != nil && !os.IsNotExist(err):
 		return err
 	case err == nil && len(notifications) == 0:
-		err := s.fs.RemoveAll(notificationsDir(currentUser))
+		err := s.fs.RemoveAll(ctx, notificationsDir(currentUser))
 		if err != nil {
 			return err
 		}
