@@ -31,6 +31,13 @@ type ExternalService interface {
 	Notify(ctx context.Context, appID string, repo RepoSpec, threadID uint64, nr NotificationRequest) error
 }
 
+// CopierFrom is an optional interface that allows copying notifications between services.
+type CopierFrom interface {
+	// CopyFrom copies all accessible notifications from src to dst user.
+	// ctx should provide permission to access all notifications in src.
+	CopyFrom(ctx context.Context, src Service, dst users.UserSpec) error
+}
+
 // ListOptions are options for List operation.
 type ListOptions struct {
 	// Repo is an optional filter. If not nil, only notifications from Repo will be listed.
