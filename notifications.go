@@ -12,7 +12,12 @@ import (
 
 // Service for notifications.
 type Service interface {
+	// List notifications for authenticated user.
+	// Returns a permission error if no authenticated user.
 	List(ctx context.Context, opt ListOptions) (Notifications, error)
+
+	// Count notifications for authenticated user.
+	// Returns a permission error if no authenticated user.
 	Count(ctx context.Context, opt interface{}) (uint64, error)
 
 	// MarkAllRead marks all notifications in the specified repository as read.
