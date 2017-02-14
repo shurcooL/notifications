@@ -4,7 +4,6 @@ package fs
 import (
 	"context"
 	"fmt"
-	"html/template"
 	"log"
 	"os"
 
@@ -61,7 +60,7 @@ func (s service) List(ctx context.Context, opt notifications.ListOptions) (notif
 			AppID:     n.AppID,
 			RepoSpec:  n.RepoSpec.RepoSpec(),
 			ThreadID:  n.ThreadID,
-			RepoURL:   template.URL("https://" + n.RepoSpec.URI),
+			RepoURL:   "https://" + n.RepoSpec.URI,
 			Title:     n.Title,
 			Icon:      n.Icon.OcticonID(),
 			Color:     n.Color.RGB(),

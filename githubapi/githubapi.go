@@ -4,7 +4,6 @@ package githubapi
 import (
 	"context"
 	"fmt"
-	"html/template"
 	"log"
 	"net/url"
 	"strconv"
@@ -60,7 +59,7 @@ func (s service) List(ctx context.Context, opt notifications.ListOptions) (notif
 		notification := notifications.Notification{
 			AppID:     *n.Subject.Type,
 			RepoSpec:  notifications.RepoSpec{URI: "github.com/" + *n.Repository.FullName},
-			RepoURL:   template.URL("https://github.com/" + *n.Repository.FullName),
+			RepoURL:   "https://github.com/" + *n.Repository.FullName,
 			Title:     *n.Subject.Title,
 			UpdatedAt: *n.UpdatedAt,
 		}
@@ -128,7 +127,7 @@ func (s service) List(ctx context.Context, opt notifications.ListOptions) (notif
 		case "RepositoryInvitation":
 			notification.Icon = "mail"
 			notification.Color = notifications.RGB{R: 0x76, G: 0x76, B: 0x76} // Gray.
-			notification.HTMLURL = template.URL("https://github.com/" + *n.Repository.FullName + "/invitations")
+			notification.HTMLURL = "https://github.com/" + *n.Repository.FullName + "/invitations"
 		default:
 			log.Printf("unsupported *n.Subject.Type: %q\n", *n.Subject.Type)
 		}
@@ -282,31 +281,31 @@ func (s service) getPullRequestState(prAPIURL string) (string, error) {
 	}
 }
 
-func getIssueURL(rs notifications.RepoSpec, issueID uint64, commentURL *string) (template.URL, error) {
+func getIssueURL(rs notifications.RepoSpec, issueID uint64, commentURL *string) (string, error) {
 	var fragment string
 	if _, commentID, err := parseCommentSpec(commentURL); err == nil {
 		fragment = fmt.Sprintf("#comment-%d", commentID)
 	}
-	return template.URL(fmt.Sprintf("https://github.com/%s/issues/%d%s", rs.URI, issueID, fragment)), nil
+	return fmt.Sprintf("https://github.com/%s/issues/%d%s", rs.URI, issueID, fragment), nil
 }
 
-func getPullRequestURL(rs notifications.RepoSpec, prID uint64, commentURL *string) (template.URL, error) {
+func getPullRequestURL(rs notifications.RepoSpec, prID uint64, commentURL *string) (string, error) {
 	var fragment string
 	if _, commentID, err := parseCommentSpec(commentURL); err == nil {
 		fragment = fmt.Sprintf("#comment-%d", commentID)
 	}
-	return template.URL(fmt.Sprintf("https://github.com/%s/pull/%d%s", rs.URI, prID, fragment)), nil
+	return fmt.Sprintf("https://github.com/%s/pull/%d%s", rs.URI, prID, fragment), nil
 }
 
-func getCommitURL(subject github.NotificationSubject) (template.URL, error) {
+func getCommitURL(subject github.NotificationSubject) (string, error) {
 	rs, commit, err := parseSpec(*subject.URL, "commits")
 	if err != nil {
 		return "", err
 	}
-	return template.URL(fmt.Sprintf("https://github.com/%s/commit/%s", rs.URI, commit)), nil
+	return fmt.Sprintf("https://github.com/%s/commit/%s", rs.URI, commit), nil
 }
 
-func (s service) getReleaseURL(releaseAPIURL string) (template.URL, error) {
+func (s service) getReleaseURL(releaseAPIURL string) (string, error) {
 	req, err := s.cl.NewRequest("GET", releaseAPIURL, nil)
 	if err != nil {
 		return "", err
@@ -316,7 +315,7 @@ func (s service) getReleaseURL(releaseAPIURL string) (template.URL, error) {
 	if err != nil {
 		return "", err
 	}
-	return template.URL(*rr.HTMLURL), nil
+	return *rr.HTMLURL, nil
 }
 
 func parseIssueSpec(issueAPIURL string) (_ notifications.RepoSpec, issueID uint64, _ error) {
@@ -412,8 +411,8 @@ func ghUser(user *github.User) users.User {
 			Domain: "github.com",
 		},
 		Login:     *user.Login,
-		AvatarURL: template.URL(avatarURLSize(*user.AvatarURL, 36)),
-		HTMLURL:   template.URL(*user.HTMLURL),
+		AvatarURL: avatarURLSize(*user.AvatarURL, 36),
+		HTMLURL:   *user.HTMLURL,
 	}
 }
 

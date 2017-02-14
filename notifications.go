@@ -4,7 +4,6 @@ package notifications
 import (
 	"context"
 	"fmt"
-	"html/template"
 	"time"
 
 	"github.com/shurcooL/users"
@@ -54,13 +53,13 @@ type Notification struct {
 	AppID     string // TODO: Rename AppID to "ThreadType" and shuffle its order to make it more clear: (RepoURI, ThreadType, ThreadID).
 	RepoSpec  RepoSpec
 	ThreadID  uint64
-	RepoURL   template.URL
+	RepoURL   string
 	Title     string
 	Icon      OcticonID // TODO: Some notifications can exist for a long time. OcticonID may change when frontend updates to newer versions of octicons. Think of a better long term solution?
 	Color     RGB
 	Actor     users.User
 	UpdatedAt time.Time
-	HTMLURL   template.URL // Address of notification target.
+	HTMLURL   string // Address of notification target.
 }
 
 // NotificationRequest represents a request to create a notification.
@@ -70,7 +69,7 @@ type NotificationRequest struct {
 	Color     RGB
 	Actor     users.UserSpec // Actor that triggered the notification.
 	UpdatedAt time.Time      // TODO: Maybe not needed? Why not use time.Now()?
-	HTMLURL   template.URL   // Address of notification target.
+	HTMLURL   string         // Address of notification target.
 }
 
 // Octicon ID. E.g., "issue-opened".

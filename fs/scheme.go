@@ -2,7 +2,6 @@ package fs
 
 import (
 	"fmt"
-	"html/template"
 	"path"
 	"strconv"
 	"strings"
@@ -93,7 +92,7 @@ type notification struct {
 	Color     rgb
 	Actor     userSpec
 	UpdatedAt time.Time
-	HTMLURL   template.URL
+	HTMLURL   string
 }
 
 // Tree layout:
