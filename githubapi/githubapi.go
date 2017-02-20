@@ -41,7 +41,7 @@ func (s service) List(ctx context.Context, opt notifications.ListOptions) (notif
 	switch opt.Repo {
 	case nil:
 		var err error
-		ghNotifications, _, err = s.clNoCache.Activity.ListNotifications(nil)
+		ghNotifications, _, err = s.clNoCache.Activity.ListNotifications(ctx, nil)
 		if err != nil {
 			return nil, err
 		}
@@ -50,7 +50,7 @@ func (s service) List(ctx context.Context, opt notifications.ListOptions) (notif
 		if err != nil {
 			return nil, err
 		}
-		ghNotifications, _, err = s.clNoCache.Activity.ListRepositoryNotifications(repo.Owner, repo.Repo, nil)
+		ghNotifications, _, err = s.clNoCache.Activity.ListRepositoryNotifications(ctx, repo.Owner, repo.Repo, nil)
 		if err != nil {
 			return nil, err
 		}
@@ -64,7 +64,7 @@ func (s service) List(ctx context.Context, opt notifications.ListOptions) (notif
 			UpdatedAt: *n.UpdatedAt,
 		}
 
-		if actor, err := s.getNotificationActor(*n.Subject); err == nil {
+		if actor, err := s.getNotificationActor(ctx, *n.Subject); err == nil {
 			notification.Actor = actor
 		}
 
@@ -75,7 +75,7 @@ func (s service) List(ctx context.Context, opt notifications.ListOptions) (notif
 				return ns, err
 			}
 			notification.ThreadID = issueID
-			switch state, err := s.getIssueState(*n.Subject.URL); {
+			switch state, err := s.getIssueState(ctx, *n.Subject.URL); {
 			case err == nil && state == "open":
 				notification.Icon = "issue-opened"
 				notification.Color = notifications.RGB{R: 0x6c, G: 0xc6, B: 0x44} // Green.
@@ -96,7 +96,7 @@ func (s service) List(ctx context.Context, opt notifications.ListOptions) (notif
 			}
 			notification.ThreadID = prID
 			notification.Icon = "git-pull-request"
-			switch state, err := s.getPullRequestState(*n.Subject.URL); {
+			switch state, err := s.getPullRequestState(ctx, *n.Subject.URL); {
 			case err == nil && state == "open":
 				notification.Color = notifications.RGB{R: 0x6c, G: 0xc6, B: 0x44} // Green.
 			case err == nil && state == "closed":
@@ -120,7 +120,7 @@ func (s service) List(ctx context.Context, opt notifications.ListOptions) (notif
 			notification.Icon = "tag"
 			notification.Color = notifications.RGB{R: 0x76, G: 0x76, B: 0x76} // Gray.
 			var err error
-			notification.HTMLURL, err = s.getReleaseURL(*n.Subject.URL)
+			notification.HTMLURL, err = s.getReleaseURL(ctx, *n.Subject.URL)
 			if err != nil {
 				return ns, err
 			}
@@ -139,7 +139,7 @@ func (s service) List(ctx context.Context, opt notifications.ListOptions) (notif
 }
 
 func (s service) Count(ctx context.Context, opt interface{}) (uint64, error) {
-	ghNotifications, _, err := s.clNoCache.Activity.ListNotifications(nil)
+	ghNotifications, _, err := s.clNoCache.Activity.ListNotifications(ctx, nil)
 	return uint64(len(ghNotifications)), err
 }
 
@@ -148,7 +148,7 @@ func (s service) MarkRead(ctx context.Context, appID string, rs notifications.Re
 	if err != nil {
 		return err
 	}
-	ns, _, err := s.cl.Activity.ListRepositoryNotifications(repo.Owner, repo.Repo, nil)
+	ns, _, err := s.cl.Activity.ListRepositoryNotifications(ctx, repo.Owner, repo.Repo, nil)
 	if err != nil {
 		return fmt.Errorf("failed to ListRepositoryNotifications: %v", err)
 	}
@@ -176,7 +176,7 @@ func (s service) MarkRead(ctx context.Context, appID string, rs notifications.Re
 			continue
 		}
 
-		_, err = s.cl.Activity.MarkThreadRead(*n.ID)
+		_, err = s.cl.Activity.MarkThreadRead(ctx, *n.ID)
 		if err != nil {
 			return fmt.Errorf("failed to MarkThreadRead: %v", err)
 		}
@@ -190,7 +190,7 @@ func (s service) MarkAllRead(ctx context.Context, rs notifications.RepoSpec) err
 	if err != nil {
 		return err
 	}
-	_, err = s.cl.Activity.MarkRepositoryNotificationsRead(repo.Owner, repo.Repo, time.Now())
+	_, err = s.cl.Activity.MarkRepositoryNotificationsRead(ctx, repo.Owner, repo.Repo, time.Now())
 	if err != nil {
 		return fmt.Errorf("failed to MarkRepositoryNotificationsRead: %v", err)
 	}
@@ -210,7 +210,7 @@ func (s service) Subscribe(ctx context.Context, appID string, repo notifications
 // getNotificationActor tries to follow the LatestCommentURL, if not-nil,
 // to fetch an object that contains a User or Author, who is taken to be
 // the actor that triggered the notification.
-func (s service) getNotificationActor(subject github.NotificationSubject) (users.User, error) {
+func (s service) getNotificationActor(ctx context.Context, subject github.NotificationSubject) (users.User, error) {
 	var apiURL string
 	if subject.LatestCommentURL != nil {
 		apiURL = *subject.LatestCommentURL
@@ -230,7 +230,7 @@ func (s service) getNotificationActor(subject github.NotificationSubject) (users
 		User   *github.User
 		Author *github.User
 	})
-	_, err = s.cl.Do(req, n)
+	_, err = s.cl.Do(ctx, req, n)
 	if err != nil {
 		return users.User{}, err
 	}
@@ -244,13 +244,13 @@ func (s service) getNotificationActor(subject github.NotificationSubject) (users
 	}
 }
 
-func (s service) getIssueState(issueAPIURL string) (string, error) {
+func (s service) getIssueState(ctx context.Context, issueAPIURL string) (string, error) {
 	req, err := s.cl.NewRequest("GET", issueAPIURL, nil)
 	if err != nil {
 		return "", err
 	}
 	issue := new(github.Issue)
-	_, err = s.cl.Do(req, issue)
+	_, err = s.cl.Do(ctx, req, issue)
 	if err != nil {
 		return "", err
 	}
@@ -260,13 +260,13 @@ func (s service) getIssueState(issueAPIURL string) (string, error) {
 	return *issue.State, nil
 }
 
-func (s service) getPullRequestState(prAPIURL string) (string, error) {
+func (s service) getPullRequestState(ctx context.Context, prAPIURL string) (string, error) {
 	req, err := s.cl.NewRequest("GET", prAPIURL, nil)
 	if err != nil {
 		return "", err
 	}
 	pr := new(github.PullRequest)
-	_, err = s.cl.Do(req, pr)
+	_, err = s.cl.Do(ctx, req, pr)
 	if err != nil {
 		return "", err
 	}
@@ -305,13 +305,13 @@ func getCommitURL(subject github.NotificationSubject) (string, error) {
 	return fmt.Sprintf("https://github.com/%s/commit/%s", rs.URI, commit), nil
 }
 
-func (s service) getReleaseURL(releaseAPIURL string) (string, error) {
+func (s service) getReleaseURL(ctx context.Context, releaseAPIURL string) (string, error) {
 	req, err := s.cl.NewRequest("GET", releaseAPIURL, nil)
 	if err != nil {
 		return "", err
 	}
 	rr := new(github.RepositoryRelease)
-	_, err = s.cl.Do(req, rr)
+	_, err = s.cl.Do(ctx, req, rr)
 	if err != nil {
 		return "", err
 	}
