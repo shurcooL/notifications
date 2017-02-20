@@ -230,7 +230,7 @@ func (s service) getNotificationActor(ctx context.Context, subject github.Notifi
 		User   *github.User
 		Author *github.User
 	})
-	_, err = s.cl.Do(req.WithContext(ctx), n)
+	_, err = s.cl.Do(ctx, req, n)
 	if err != nil {
 		return users.User{}, err
 	}
@@ -250,7 +250,7 @@ func (s service) getIssueState(ctx context.Context, issueAPIURL string) (string,
 		return "", err
 	}
 	issue := new(github.Issue)
-	_, err = s.cl.Do(req.WithContext(ctx), issue)
+	_, err = s.cl.Do(ctx, req, issue)
 	if err != nil {
 		return "", err
 	}
@@ -266,7 +266,7 @@ func (s service) getPullRequestState(ctx context.Context, prAPIURL string) (stri
 		return "", err
 	}
 	pr := new(github.PullRequest)
-	_, err = s.cl.Do(req.WithContext(ctx), pr)
+	_, err = s.cl.Do(ctx, req, pr)
 	if err != nil {
 		return "", err
 	}
@@ -311,7 +311,7 @@ func (s service) getReleaseURL(ctx context.Context, releaseAPIURL string) (strin
 		return "", err
 	}
 	rr := new(github.RepositoryRelease)
-	_, err = s.cl.Do(req.WithContext(ctx), rr)
+	_, err = s.cl.Do(ctx, req, rr)
 	if err != nil {
 		return "", err
 	}
