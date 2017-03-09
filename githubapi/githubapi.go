@@ -62,6 +62,8 @@ func (s service) List(ctx context.Context, opt notifications.ListOptions) (notif
 			RepoURL:   "https://github.com/" + *n.Repository.FullName,
 			Title:     *n.Subject.Title,
 			UpdatedAt: *n.UpdatedAt,
+
+			Participating: *n.Reason != "subscribed", // According to https://developer.github.com/v3/activity/notifications/#notification-reasons, "subscribed" reason means "you're watching the repository", and all other reasons imply participation.
 		}
 
 		if actor, err := s.getNotificationActor(ctx, *n.Subject); err == nil {

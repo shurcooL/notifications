@@ -60,6 +60,8 @@ type Notification struct {
 	Actor     users.User
 	UpdatedAt time.Time
 	HTMLURL   string // Address of notification target.
+
+	Participating bool // Whether user is participating in the thread, or just watching.
 }
 
 // NotificationRequest represents a request to create a notification.

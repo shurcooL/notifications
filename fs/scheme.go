@@ -93,6 +93,8 @@ type notification struct {
 	Actor     userSpec
 	UpdatedAt time.Time
 	HTMLURL   string
+
+	Participating bool
 }
 
 // Tree layout:

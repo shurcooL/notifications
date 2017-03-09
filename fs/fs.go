@@ -101,9 +101,13 @@ func (s service) Notify(ctx context.Context, appID string, repo notifications.Re
 		return os.ErrPermission
 	}
 
-	var subscribers = make(map[users.UserSpec]struct{})
+	type subscription struct {
+		Participating bool
+	}
+	var subscribers = make(map[users.UserSpec]subscription)
 
-	fis, err := vfsutil.ReadDir(s.fs, subscribersDir(repo, appID, threadID)) // Thread subscribers.
+	// Repo watchers.
+	fis, err := vfsutil.ReadDir(s.fs, subscribersDir(repo, "", 0))
 	if os.IsNotExist(err) {
 		fis = nil
 	} else if err != nil {
@@ -117,10 +121,12 @@ func (s service) Notify(ctx context.Context, appID string, repo notifications.Re
 		if err != nil {
 			continue
 		}
-		subscribers[subscriber] = struct{}{}
+		subscribers[subscriber] = subscription{Participating: false}
 	}
 
-	fis, err = vfsutil.ReadDir(s.fs, subscribersDir(repo, "", 0)) // Repo watchers.
+	// Thread subscribers. Iterate over them after repo watchers,
+	// so that their participating status takes higher precedence.
+	fis, err = vfsutil.ReadDir(s.fs, subscribersDir(repo, appID, threadID))
 	if os.IsNotExist(err) {
 		fis = nil
 	} else if err != nil {
@@ -134,10 +140,10 @@ func (s service) Notify(ctx context.Context, appID string, repo notifications.Re
 		if err != nil {
 			continue
 		}
-		subscribers[subscriber] = struct{}{}
+		subscribers[subscriber] = subscription{Participating: true}
 	}
 
-	for subscriber := range subscribers {
+	for subscriber, subscription := range subscribers {
 		if currentUser.ID != 0 && subscriber == currentUser {
 			// Don't notify user of his own actions.
 			continue
@@ -160,6 +166,8 @@ func (s service) Notify(ctx context.Context, appID string, repo notifications.Re
 			Icon:      fromOcticonID(nr.Icon),
 			Color:     fromRGB(nr.Color),
 			Actor:     fromUserSpec(nr.Actor),
+
+			Participating: subscription.Participating,
 		}
 		err = jsonEncodeFile(s.fs, notificationPath(subscriber, notificationKey(repo, appID, threadID)), n)
 		// TODO: Maybe in future read previous value, and use it to preserve some fields, like earliest HTML URL.
