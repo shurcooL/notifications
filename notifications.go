@@ -27,11 +27,13 @@ type Service interface {
 
 // ExternalService for notifications.
 type ExternalService interface {
+	// Subscribe subscribes subscribers to the specified thread.
 	Subscribe(ctx context.Context, appID string, repo RepoSpec, threadID uint64, subscribers []users.UserSpec) error
 
 	// MarkRead marks the specified thread as read.
 	MarkRead(ctx context.Context, appID string, repo RepoSpec, threadID uint64) error
 
+	// Notify notifies subscribers of the specified thread of a notification.
 	Notify(ctx context.Context, appID string, repo RepoSpec, threadID uint64, nr NotificationRequest) error
 }
 
