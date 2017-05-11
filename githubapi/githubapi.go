@@ -37,22 +37,36 @@ type service struct {
 func (s service) List(ctx context.Context, opt notifications.ListOptions) (notifications.Notifications, error) {
 	var ns []notifications.Notification
 
+	ghOpt := &github.NotificationListOptions{ListOptions: github.ListOptions{PerPage: 100}}
 	var ghNotifications []*github.Notification
 	switch opt.Repo {
 	case nil:
-		var err error
-		ghNotifications, _, err = s.clNoCache.Activity.ListNotifications(ctx, nil)
-		if err != nil {
-			return nil, err
+		for {
+			ns, resp, err := s.clNoCache.Activity.ListNotifications(ctx, ghOpt)
+			if err != nil {
+				return nil, err
+			}
+			ghNotifications = append(ghNotifications, ns...)
+			if resp.NextPage == 0 {
+				break
+			}
+			ghOpt.Page = resp.NextPage
 		}
 	default:
 		repo, err := ghRepoSpec(*opt.Repo)
 		if err != nil {
 			return nil, err
 		}
-		ghNotifications, _, err = s.clNoCache.Activity.ListRepositoryNotifications(ctx, repo.Owner, repo.Repo, nil)
-		if err != nil {
-			return nil, err
+		for {
+			ns, resp, err := s.clNoCache.Activity.ListRepositoryNotifications(ctx, repo.Owner, repo.Repo, ghOpt)
+			if err != nil {
+				return nil, err
+			}
+			ghNotifications = append(ghNotifications, ns...)
+			if resp.NextPage == 0 {
+				break
+			}
+			ghOpt.Page = resp.NextPage
 		}
 	}
 	for _, n := range ghNotifications {
@@ -66,6 +80,8 @@ func (s service) List(ctx context.Context, opt notifications.ListOptions) (notif
 			Participating: *n.Reason != "subscribed", // According to https://developer.github.com/v3/activity/notifications/#notification-reasons, "subscribed" reason means "you're watching the repository", and all other reasons imply participation.
 		}
 
+		// This makes a single API call. It's relatively slow/expensive
+		// because it happens in the ghNotifications loop.
 		if actor, err := s.getNotificationActor(ctx, *n.Subject); err == nil {
 			notification.Actor = actor
 		}
