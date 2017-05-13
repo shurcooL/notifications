@@ -40,7 +40,7 @@ func (s service) CopyFrom(ctx context.Context, src notifications.Service, dst us
 		}
 
 		// Put in storage.
-		err = jsonEncodeFile(s.fs, notificationPath(dst, notificationKey(n.RepoSpec, n.AppID, n.ThreadID)), notification)
+		err = jsonEncodeFile(ctx, s.fs, notificationPath(dst, notificationKey(n.RepoSpec, n.AppID, n.ThreadID)), notification)
 		if err != nil {
 			return fmt.Errorf("error writing %s: %v", notificationPath(dst, notificationKey(n.RepoSpec, n.AppID, n.ThreadID)), err)
 		}

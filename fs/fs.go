@@ -38,7 +38,7 @@ func (s service) List(ctx context.Context, opt notifications.ListOptions) (notif
 	}
 
 	var ns notifications.Notifications
-	fis, err := vfsutil.ReadDir(s.fs, notificationsDir(currentUser))
+	fis, err := vfsutil.ReadDir(ctx, s.fs, notificationsDir(currentUser))
 	if os.IsNotExist(err) {
 		fis = nil
 	} else if err != nil {
@@ -46,7 +46,7 @@ func (s service) List(ctx context.Context, opt notifications.ListOptions) (notif
 	}
 	for _, fi := range fis {
 		var n notification
-		err := jsonDecodeFile(s.fs, notificationPath(currentUser, fi.Name()), &n)
+		err := jsonDecodeFile(ctx, s.fs, notificationPath(currentUser, fi.Name()), &n)
 		if err != nil {
 			return nil, fmt.Errorf("error reading %s: %v", notificationPath(currentUser, fi.Name()), err)
 		}
@@ -83,7 +83,7 @@ func (s service) Count(ctx context.Context, opt interface{}) (uint64, error) {
 	}
 
 	// TODO: Consider reading/parsing entries, in case there's .DS_Store, etc., that should be skipped?
-	notifications, err := vfsutil.ReadDir(s.fs, notificationsDir(currentUser))
+	notifications, err := vfsutil.ReadDir(ctx, s.fs, notificationsDir(currentUser))
 	if os.IsNotExist(err) {
 		notifications = nil
 	} else if err != nil {
@@ -107,7 +107,7 @@ func (s service) Notify(ctx context.Context, appID string, repo notifications.Re
 	var subscribers = make(map[users.UserSpec]subscription)
 
 	// Repo watchers.
-	fis, err := vfsutil.ReadDir(s.fs, subscribersDir(repo, "", 0))
+	fis, err := vfsutil.ReadDir(ctx, s.fs, subscribersDir(repo, "", 0))
 	if os.IsNotExist(err) {
 		fis = nil
 	} else if err != nil {
@@ -126,7 +126,7 @@ func (s service) Notify(ctx context.Context, appID string, repo notifications.Re
 
 	// Thread subscribers. Iterate over them after repo watchers,
 	// so that their participating status takes higher precedence.
-	fis, err = vfsutil.ReadDir(s.fs, subscribersDir(repo, appID, threadID))
+	fis, err = vfsutil.ReadDir(ctx, s.fs, subscribersDir(repo, appID, threadID))
 	if os.IsNotExist(err) {
 		fis = nil
 	} else if err != nil {
@@ -169,7 +169,7 @@ func (s service) Notify(ctx context.Context, appID string, repo notifications.Re
 
 			Participating: subscription.Participating,
 		}
-		err = jsonEncodeFile(s.fs, notificationPath(subscriber, notificationKey(repo, appID, threadID)), n)
+		err = jsonEncodeFile(ctx, s.fs, notificationPath(subscriber, notificationKey(repo, appID, threadID)), n)
 		// TODO: Maybe in future read previous value, and use it to preserve some fields, like earliest HTML URL.
 		//       Maybe that shouldn't happen here though.
 		if err != nil {
@@ -190,7 +190,7 @@ func (s service) Subscribe(ctx context.Context, appID string, repo notifications
 	}
 
 	for _, subscriber := range subscribers {
-		err := createEmptyFile(s.fs, subscriberPath(repo, appID, threadID, subscriber))
+		err := createEmptyFile(ctx, s.fs, subscriberPath(repo, appID, threadID, subscriber))
 		if err != nil {
 			return err
 		}
@@ -215,7 +215,7 @@ func (s service) MarkRead(ctx context.Context, appID string, repo notifications.
 	}
 	// THINK: Consider using the dir-less vfs abstraction for doing this implicitly? Less code here.
 	// If the user has no more notifications left, remove their empty directory.
-	switch notifications, err := vfsutil.ReadDir(s.fs, notificationsDir(currentUser)); {
+	switch notifications, err := vfsutil.ReadDir(ctx, s.fs, notificationsDir(currentUser)); {
 	case err != nil && !os.IsNotExist(err):
 		return err
 	case err == nil && len(notifications) == 0:
@@ -238,7 +238,7 @@ func (s service) MarkAllRead(ctx context.Context, repo notifications.RepoSpec) e
 	}
 
 	// Iterate all user's notifications.
-	fis, err := vfsutil.ReadDir(s.fs, notificationsDir(currentUser))
+	fis, err := vfsutil.ReadDir(ctx, s.fs, notificationsDir(currentUser))
 	if os.IsNotExist(err) {
 		fis = nil
 	} else if err != nil {
@@ -246,7 +246,7 @@ func (s service) MarkAllRead(ctx context.Context, repo notifications.RepoSpec) e
 	}
 	for _, fi := range fis {
 		var n notification
-		err := jsonDecodeFile(s.fs, notificationPath(currentUser, fi.Name()), &n)
+		err := jsonDecodeFile(ctx, s.fs, notificationPath(currentUser, fi.Name()), &n)
 		if err != nil {
 			log.Printf("error reading %s: %v\n", notificationPath(currentUser, fi.Name()), err)
 			continue
@@ -266,7 +266,7 @@ func (s service) MarkAllRead(ctx context.Context, repo notifications.RepoSpec) e
 
 	// THINK: Consider using the dir-less vfs abstraction for doing this implicitly? Less code here.
 	// If the user has no more notifications left, remove their empty directory.
-	switch notifications, err := vfsutil.ReadDir(s.fs, notificationsDir(currentUser)); {
+	switch notifications, err := vfsutil.ReadDir(ctx, s.fs, notificationsDir(currentUser)); {
 	case err != nil && !os.IsNotExist(err):
 		return err
 	case err == nil && len(notifications) == 0:
