@@ -1,4 +1,7 @@
-# notifications [![Build Status](https://travis-ci.org/shurcooL/notifications.svg?branch=master)](https://travis-ci.org/shurcooL/notifications) [![GoDoc](https://godoc.org/github.com/shurcooL/notifications?status.svg)](https://godoc.org/github.com/shurcooL/notifications)
+notifications
+=============
+
+[![Build Status](https://travis-ci.org/shurcooL/notifications.svg?branch=master)](https://travis-ci.org/shurcooL/notifications) [![GoDoc](https://godoc.org/github.com/shurcooL/notifications?status.svg)](https://godoc.org/github.com/shurcooL/notifications)
 
 Package notifications provides a notifications service definition.
 
