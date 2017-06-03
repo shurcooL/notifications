@@ -127,22 +127,38 @@ func (s service) List(ctx context.Context, opt notifications.ListOptions) (notif
 				return ns, err
 			}
 		case "Commit":
+			id, err := strconv.ParseUint(*n.ID, 10, 64)
+			if err != nil {
+				log.Printf("notifications/githubapi: failed to parse Commit notification ID %q to uint64: %v\n", *n.ID, err)
+				id = 0
+			}
+			notification.ThreadID = id
 			notification.Icon = "git-commit"
 			notification.Color = notifications.RGB{R: 0x76, G: 0x76, B: 0x76} // Gray.
-			var err error
 			notification.HTMLURL, err = getCommitURL(*n.Subject)
 			if err != nil {
 				return ns, err
 			}
 		case "Release":
+			id, err := strconv.ParseUint(*n.ID, 10, 64)
+			if err != nil {
+				log.Printf("notifications/githubapi: failed to parse Release notification ID %q to uint64: %v\n", *n.ID, err)
+				id = 0
+			}
+			notification.ThreadID = id
 			notification.Icon = "tag"
 			notification.Color = notifications.RGB{R: 0x76, G: 0x76, B: 0x76} // Gray.
-			var err error
 			notification.HTMLURL, err = s.getReleaseURL(ctx, *n.Subject.URL)
 			if err != nil {
 				return ns, err
 			}
 		case "RepositoryInvitation":
+			id, err := strconv.ParseUint(*n.ID, 10, 64)
+			if err != nil {
+				log.Printf("notifications/githubapi: failed to parse RepositoryInvitation notification ID %q to uint64: %v\n", *n.ID, err)
+				id = 0
+			}
+			notification.ThreadID = id
 			notification.Icon = "mail"
 			notification.Color = notifications.RGB{R: 0x76, G: 0x76, B: 0x76} // Gray.
 			notification.HTMLURL = "https://github.com/" + *n.Repository.FullName + "/invitations"
@@ -162,6 +178,10 @@ func (s service) Count(ctx context.Context, opt interface{}) (uint64, error) {
 }
 
 func (s service) MarkRead(ctx context.Context, appID string, rs notifications.RepoSpec, threadID uint64) error {
+	// Note: If we can always parse the notification ID (a numeric string like "230400425")
+	//       from GitHub into a uint64 reliably, then we can skip the whole list repo notifications
+	//       and match stuff dance, and just do Activity.MarkThreadRead(ctx, threadID) directly...
+
 	repo, err := ghRepoSpec(rs)
 	if err != nil {
 		return err
@@ -187,6 +207,8 @@ func (s service) MarkRead(ctx context.Context, appID string, rs notifications.Re
 			if err != nil {
 				return fmt.Errorf("failed to parsePullRequestSpec: %v", err)
 			}
+		case "Commit", "Release", "RepositoryInvitation":
+			id = threadID
 		default:
 			return fmt.Errorf("MarkRead: unsupported *n.Subject.Type: %v", *n.Subject.Type)
 		}
