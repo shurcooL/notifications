@@ -173,8 +173,16 @@ func (s service) List(ctx context.Context, opt notifications.ListOptions) (notif
 }
 
 func (s service) Count(ctx context.Context, opt interface{}) (uint64, error) {
-	ghNotifications, _, err := s.clNoCache.Activity.ListNotifications(ctx, nil)
-	return uint64(len(ghNotifications)), err
+	ghOpt := &github.NotificationListOptions{ListOptions: github.ListOptions{PerPage: 1}}
+	ghNotifications, resp, err := s.clNoCache.Activity.ListNotifications(ctx, ghOpt)
+	if err != nil {
+		return 0, err
+	}
+	if resp.LastPage != 0 {
+		return uint64(resp.LastPage), nil
+	} else {
+		return uint64(len(ghNotifications)), nil
+	}
 }
 
 func (s service) MarkRead(ctx context.Context, appID string, rs notifications.RepoSpec, threadID uint64) error {
