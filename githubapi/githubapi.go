@@ -70,8 +70,14 @@ func (s service) List(ctx context.Context, opt notifications.ListOptions) (notif
 		}
 	}
 	for _, n := range ghNotifications {
+		id, err := strconv.ParseUint(*n.ID, 10, 64)
+		if err != nil {
+			return ns, fmt.Errorf("notifications/githubapi: failed to parse %v notification ID %q to uint64: %v", *n.Subject.Type, *n.ID, err)
+		}
+
 		notification := notifications.Notification{
-			AppID:     *n.Subject.Type,
+			ThreadID:  id, // GitHub's global notification identifier.
+			AppID:     "GitHub",
 			RepoSpec:  notifications.RepoSpec{URI: "github.com/" + *n.Repository.FullName},
 			RepoURL:   "https://github.com/" + *n.Repository.FullName,
 			Title:     *n.Subject.Title,
@@ -88,11 +94,6 @@ func (s service) List(ctx context.Context, opt notifications.ListOptions) (notif
 
 		switch *n.Subject.Type {
 		case "Issue":
-			rs, issueID, err := parseIssueSpec(*n.Subject.URL)
-			if err != nil {
-				return ns, err
-			}
-			notification.ThreadID = issueID
 			switch state, err := s.getIssueState(ctx, *n.Subject.URL); {
 			case err == nil && state == "open":
 				notification.Icon = "issue-opened"
@@ -103,16 +104,16 @@ func (s service) List(ctx context.Context, opt notifications.ListOptions) (notif
 			default:
 				notification.Icon = "issue-opened"
 			}
+			// TODO: See if parseIssueSpec and/or getIssueURL can be combined or removed, etc.
+			rs, issueID, err := parseIssueSpec(*n.Subject.URL)
+			if err != nil {
+				return ns, err
+			}
 			notification.HTMLURL, err = getIssueURL(rs, issueID, n.Subject.LatestCommentURL)
 			if err != nil {
 				return ns, err
 			}
 		case "PullRequest":
-			rs, prID, err := parsePullRequestSpec(*n.Subject.URL)
-			if err != nil {
-				return ns, err
-			}
-			notification.ThreadID = prID
 			notification.Icon = "git-pull-request"
 			switch state, err := s.getPullRequestState(ctx, *n.Subject.URL); {
 			case err == nil && state == "open":
@@ -122,17 +123,16 @@ func (s service) List(ctx context.Context, opt notifications.ListOptions) (notif
 			case err == nil && state == "merged":
 				notification.Color = notifications.RGB{R: 0x6e, G: 0x54, B: 0x94} // Purple.
 			}
+			// TODO: See if parsePullRequestSpec and/or getPullRequestURL can be combined or removed, etc.
+			rs, prID, err := parsePullRequestSpec(*n.Subject.URL)
+			if err != nil {
+				return ns, err
+			}
 			notification.HTMLURL, err = getPullRequestURL(rs, prID, n.Subject.LatestCommentURL)
 			if err != nil {
 				return ns, err
 			}
 		case "Commit":
-			id, err := strconv.ParseUint(*n.ID, 10, 64)
-			if err != nil {
-				log.Printf("notifications/githubapi: failed to parse Commit notification ID %q to uint64: %v\n", *n.ID, err)
-				id = 0
-			}
-			notification.ThreadID = id
 			notification.Icon = "git-commit"
 			notification.Color = notifications.RGB{R: 0x76, G: 0x76, B: 0x76} // Gray.
 			notification.HTMLURL, err = getCommitURL(*n.Subject)
@@ -140,12 +140,6 @@ func (s service) List(ctx context.Context, opt notifications.ListOptions) (notif
 				return ns, err
 			}
 		case "Release":
-			id, err := strconv.ParseUint(*n.ID, 10, 64)
-			if err != nil {
-				log.Printf("notifications/githubapi: failed to parse Release notification ID %q to uint64: %v\n", *n.ID, err)
-				id = 0
-			}
-			notification.ThreadID = id
 			notification.Icon = "tag"
 			notification.Color = notifications.RGB{R: 0x76, G: 0x76, B: 0x76} // Gray.
 			notification.HTMLURL, err = s.getReleaseURL(ctx, *n.Subject.URL)
@@ -153,12 +147,6 @@ func (s service) List(ctx context.Context, opt notifications.ListOptions) (notif
 				return ns, err
 			}
 		case "RepositoryInvitation":
-			id, err := strconv.ParseUint(*n.ID, 10, 64)
-			if err != nil {
-				log.Printf("notifications/githubapi: failed to parse RepositoryInvitation notification ID %q to uint64: %v\n", *n.ID, err)
-				id = 0
-			}
-			notification.ThreadID = id
 			notification.Icon = "mail"
 			notification.Color = notifications.RGB{R: 0x76, G: 0x76, B: 0x76} // Gray.
 			notification.HTMLURL = "https://github.com/" + *n.Repository.FullName + "/invitations"
@@ -186,49 +174,15 @@ func (s service) Count(ctx context.Context, opt interface{}) (uint64, error) {
 }
 
 func (s service) MarkRead(ctx context.Context, appID string, rs notifications.RepoSpec, threadID uint64) error {
-	// Note: If we can always parse the notification ID (a numeric string like "230400425")
-	//       from GitHub into a uint64 reliably, then we can skip the whole list repo notifications
-	//       and match stuff dance, and just do Activity.MarkThreadRead(ctx, threadID) directly...
-
-	repo, err := ghRepoSpec(rs)
-	if err != nil {
-		return err
+	if threadID == 0 {
+		return fmt.Errorf("MarkRead: threadID is 0")
 	}
-	ns, _, err := s.cl.Activity.ListRepositoryNotifications(ctx, repo.Owner, repo.Repo, nil)
-	if err != nil {
-		return fmt.Errorf("failed to ListRepositoryNotifications: %v", err)
+	if appID != "GitHub" {
+		return fmt.Errorf(`MarkRead: appID is %q, want "GitHub"`, appID)
 	}
-	for _, n := range ns {
-		if *n.Subject.Type != appID {
-			continue
-		}
-
-		var id uint64
-		switch *n.Subject.Type {
-		case "Issue":
-			_, id, err = parseIssueSpec(*n.Subject.URL)
-			if err != nil {
-				return fmt.Errorf("failed to parseIssueSpec: %v", err)
-			}
-		case "PullRequest":
-			_, id, err = parsePullRequestSpec(*n.Subject.URL)
-			if err != nil {
-				return fmt.Errorf("failed to parsePullRequestSpec: %v", err)
-			}
-		case "Commit", "Release", "RepositoryInvitation":
-			id = threadID
-		default:
-			return fmt.Errorf("MarkRead: unsupported *n.Subject.Type: %v", *n.Subject.Type)
-		}
-		if id != threadID {
-			continue
-		}
-
-		_, err = s.cl.Activity.MarkThreadRead(ctx, *n.ID)
-		if err != nil {
-			return fmt.Errorf("failed to MarkThreadRead: %v", err)
-		}
-		break
+	_, err := s.cl.Activity.MarkThreadRead(ctx, strconv.FormatUint(threadID, 10))
+	if err != nil {
+		return fmt.Errorf("MarkRead: failed to MarkThreadRead: %v", err)
 	}
 	return nil
 }
@@ -240,7 +194,7 @@ func (s service) MarkAllRead(ctx context.Context, rs notifications.RepoSpec) err
 	}
 	_, err = s.cl.Activity.MarkRepositoryNotificationsRead(ctx, repo.Owner, repo.Repo, time.Now())
 	if err != nil {
-		return fmt.Errorf("failed to MarkRepositoryNotificationsRead: %v", err)
+		return fmt.Errorf("MarkAllRead: failed to MarkRepositoryNotificationsRead: %v", err)
 	}
 	return nil
 }
