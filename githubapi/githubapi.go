@@ -129,8 +129,7 @@ func (s service) List(ctx context.Context, opt notifications.ListOptions) (notif
 		case "Commit":
 			id, err := strconv.ParseUint(*n.ID, 10, 64)
 			if err != nil {
-				log.Printf("notifications/githubapi: failed to parse Commit notification ID %q to uint64: %v\n", *n.ID, err)
-				id = 0
+				return ns, fmt.Errorf("notifications/githubapi: failed to parse Commit notification ID %q to uint64: %v", *n.ID, err)
 			}
 			notification.ThreadID = id
 			notification.Icon = "git-commit"
@@ -142,8 +141,7 @@ func (s service) List(ctx context.Context, opt notifications.ListOptions) (notif
 		case "Release":
 			id, err := strconv.ParseUint(*n.ID, 10, 64)
 			if err != nil {
-				log.Printf("notifications/githubapi: failed to parse Release notification ID %q to uint64: %v\n", *n.ID, err)
-				id = 0
+				return ns, fmt.Errorf("notifications/githubapi: failed to parse Release notification ID %q to uint64: %v", *n.ID, err)
 			}
 			notification.ThreadID = id
 			notification.Icon = "tag"
@@ -155,8 +153,7 @@ func (s service) List(ctx context.Context, opt notifications.ListOptions) (notif
 		case "RepositoryInvitation":
 			id, err := strconv.ParseUint(*n.ID, 10, 64)
 			if err != nil {
-				log.Printf("notifications/githubapi: failed to parse RepositoryInvitation notification ID %q to uint64: %v\n", *n.ID, err)
-				id = 0
+				return ns, fmt.Errorf("notifications/githubapi: failed to parse RepositoryInvitation notification ID %q to uint64: %v", *n.ID, err)
 			}
 			notification.ThreadID = id
 			notification.Icon = "mail"
@@ -186,14 +183,27 @@ func (s service) Count(ctx context.Context, opt interface{}) (uint64, error) {
 }
 
 func (s service) MarkRead(ctx context.Context, appID string, rs notifications.RepoSpec, threadID uint64) error {
+	if appID == "Commit" || appID == "Release" || appID == "RepositoryInvitation" {
+		_, err := s.cl.Activity.MarkThreadRead(ctx, strconv.FormatUint(threadID, 10))
+		if err != nil {
+			return fmt.Errorf("MarkRead: failed to MarkThreadRead: %v", err)
+		}
+		return nil
+	}
+
 	// Note: If we can always parse the notification ID (a numeric string like "230400425")
 	//       from GitHub into a uint64 reliably, then we can skip the whole list repo notifications
 	//       and match stuff dance, and just do Activity.MarkThreadRead(ctx, threadID) directly...
+	// Update: Not quite. We need to return actual issue IDs as ThreadIDs in List, so that
+	//         issuesapp.augmentUnread works correctly. But maybe if we can store it in another
+	//         field...
 
 	repo, err := ghRepoSpec(rs)
 	if err != nil {
 		return err
 	}
+	// It's okay to use with-cache client here, because we don't mind seeing read notifications
+	// for the purposes of MarkRead. They'll be skipped if the notification ID doesn't match.
 	ns, _, err := s.cl.Activity.ListRepositoryNotifications(ctx, repo.Owner, repo.Repo, nil)
 	if err != nil {
 		return fmt.Errorf("failed to ListRepositoryNotifications: %v", err)
@@ -216,7 +226,8 @@ func (s service) MarkRead(ctx context.Context, appID string, rs notifications.Re
 				return fmt.Errorf("failed to parsePullRequestSpec: %v", err)
 			}
 		case "Commit", "Release", "RepositoryInvitation":
-			id = threadID
+			// These thread types are already handled on top, so skip them.
+			continue
 		default:
 			return fmt.Errorf("MarkRead: unsupported *n.Subject.Type: %v", *n.Subject.Type)
 		}
@@ -226,11 +237,11 @@ func (s service) MarkRead(ctx context.Context, appID string, rs notifications.Re
 
 		_, err = s.cl.Activity.MarkThreadRead(ctx, *n.ID)
 		if err != nil {
-			return fmt.Errorf("failed to MarkThreadRead: %v", err)
+			return fmt.Errorf("MarkRead: failed to MarkThreadRead: %v", err)
 		}
-		break
+		return nil
 	}
-	return nil
+	return fmt.Errorf("MarkRead: did not find notification %s/%d within %d notifications of repo %s", appID, threadID, len(ns), rs.URI)
 }
 
 func (s service) MarkAllRead(ctx context.Context, rs notifications.RepoSpec) error {
