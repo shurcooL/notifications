@@ -28,6 +28,8 @@ func marshalUserSpec(us users.UserSpec) string {
 	return fmt.Sprintf("%d@%s", us.ID, us.Domain)
 }
 
+// unmarshalUserSpec parses userSpec, a string like "1@example.com"
+// into a users.UserSpec{ID: 1, Domain: "example.com"}.
 func unmarshalUserSpec(userSpec string) (users.UserSpec, error) {
 	parts := strings.SplitN(userSpec, "@", 2)
 	if len(parts) != 2 {
