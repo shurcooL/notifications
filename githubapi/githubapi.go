@@ -241,7 +241,16 @@ func (s service) MarkRead(ctx context.Context, appID string, rs notifications.Re
 		}
 		return nil
 	}
-	return fmt.Errorf("MarkRead: did not find notification %s/%d within %d notifications of repo %s", appID, threadID, len(ns), rs.URI)
+	return fmt.Errorf("MarkRead: did not find notification %s/%d within %d notifications of repo %s:\n%v", appID, threadID, len(ns), rs.URI, notificationsString(ns))
+}
+
+// notificationsString returns a string representation of notifications ns.
+func notificationsString(ns []*github.Notification) string {
+	var ss []string
+	for _, n := range ns {
+		ss = append(ss, fmt.Sprintf("%v\t%v/%v", strings.TrimPrefix(*n.Subject.URL, "https://api.github.com/"), *n.Subject.Type, *n.ID))
+	}
+	return strings.Join(ss, "\n")
 }
 
 func (s service) MarkAllRead(ctx context.Context, rs notifications.RepoSpec) error {
