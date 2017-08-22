@@ -121,6 +121,8 @@ func (s service) List(ctx context.Context, opt notifications.ListOptions) (notif
 				notification.Color = notifications.RGB{R: 0xbd, G: 0x2c, B: 0x00} // Red.
 			case err == nil && state == "merged":
 				notification.Color = notifications.RGB{R: 0x6e, G: 0x54, B: 0x94} // Purple.
+			default:
+				log.Println("githubapi.service.List: getPullRequestState:", err)
 			}
 			notification.HTMLURL, err = getPullRequestURL(rs, prID, n.Subject.LatestCommentURL)
 			if err != nil {
