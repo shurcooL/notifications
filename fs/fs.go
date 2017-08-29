@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"time"
 
 	"github.com/shurcooL/notifications"
 	"github.com/shurcooL/users"
@@ -38,6 +39,7 @@ func (s service) List(ctx context.Context, opt notifications.ListOptions) (notif
 	}
 
 	var ns notifications.Notifications
+
 	fis, err := vfsutil.ReadDir(ctx, s.fs, notificationsDir(currentUser))
 	if os.IsNotExist(err) {
 		fis = nil
@@ -68,6 +70,50 @@ func (s service) List(ctx context.Context, opt notifications.ListOptions) (notif
 			UpdatedAt: n.UpdatedAt,
 			HTMLURL:   n.HTMLURL,
 		})
+	}
+
+	if opt.All {
+		fis, err := vfsutil.ReadDir(ctx, s.fs, readDir(currentUser))
+		if os.IsNotExist(err) {
+			fis = nil
+		} else if err != nil {
+			return nil, err
+		}
+		for _, fi := range fis {
+			var n notification
+			err := jsonDecodeFile(ctx, s.fs, readPath(currentUser, fi.Name()), &n)
+			if err != nil {
+				return nil, fmt.Errorf("error reading %s: %v", readPath(currentUser, fi.Name()), err)
+			}
+
+			// Delete and skip old read notifications.
+			if time.Since(n.UpdatedAt) > 30*24*time.Hour {
+				err := s.fs.RemoveAll(ctx, readPath(currentUser, fi.Name()))
+				if err != nil {
+					return nil, err
+				}
+				continue
+			}
+
+			if opt.Repo != nil && n.RepoSpec.RepoSpec() != *opt.Repo {
+				continue
+			}
+
+			// TODO: Maybe deduce appID and threadID from fi.Name() rather than adding that to encoded JSON...
+			ns = append(ns, notifications.Notification{
+				AppID:     n.AppID,
+				RepoSpec:  n.RepoSpec.RepoSpec(),
+				ThreadID:  n.ThreadID,
+				RepoURL:   "https://" + n.RepoSpec.URI,
+				Title:     n.Title,
+				Icon:      n.Icon.OcticonID(),
+				Color:     n.Color.RGB(),
+				Actor:     s.user(ctx, n.Actor.UserSpec()),
+				UpdatedAt: n.UpdatedAt,
+				Read:      true,
+				HTMLURL:   n.HTMLURL,
+			})
+		}
 	}
 
 	return ns, nil
@@ -149,6 +195,12 @@ func (s service) Notify(ctx context.Context, appID string, repo notifications.Re
 			continue
 		}
 
+		// Delete read notification with same key, if any.
+		err = s.fs.RemoveAll(ctx, readPath(subscriber, notificationKey(repo, appID, threadID)))
+		if err != nil && !os.IsNotExist(err) {
+			return err
+		}
+
 		// Create notificationsDir for subscriber in case it doesn't already exist.
 		err = s.fs.Mkdir(ctx, notificationsDir(subscriber), 0755)
 		if err != nil && !os.IsExist(err) {
@@ -165,7 +217,7 @@ func (s service) Notify(ctx context.Context, appID string, repo notifications.Re
 			UpdatedAt: nr.UpdatedAt,
 			Icon:      fromOcticonID(nr.Icon),
 			Color:     fromRGB(nr.Color),
-			Actor:     fromUserSpec(nr.Actor),
+			Actor:     fromUserSpec(nr.Actor), // TODO: Why not use current user?
 
 			Participating: subscription.Participating,
 		}
@@ -208,11 +260,18 @@ func (s service) MarkRead(ctx context.Context, appID string, repo notifications.
 		return os.ErrPermission
 	}
 
-	// TODO: Move notification instead of outright removing, maybe?
-	err = s.fs.RemoveAll(ctx, notificationPath(currentUser, notificationKey(repo, appID, threadID)))
+	// Create readDir for currentUser in case it doesn't already exist.
+	err = s.fs.Mkdir(ctx, readDir(currentUser), 0755)
+	if err != nil && !os.IsExist(err) {
+		return err
+	}
+	// Move notification to read directory.
+	key := notificationKey(repo, appID, threadID)
+	err = s.fs.Rename(ctx, notificationPath(currentUser, key), readPath(currentUser, key))
 	if err != nil {
 		return err
 	}
+
 	// THINK: Consider using the dir-less vfs abstraction for doing this implicitly? Less code here.
 	// If the user has no more notifications left, remove their empty directory.
 	switch notifications, err := vfsutil.ReadDir(ctx, s.fs, notificationsDir(currentUser)); {
@@ -237,6 +296,12 @@ func (s service) MarkAllRead(ctx context.Context, repo notifications.RepoSpec) e
 		return os.ErrPermission
 	}
 
+	// Create readDir for currentUser in case it doesn't already exist.
+	err = s.fs.Mkdir(ctx, readDir(currentUser), 0755)
+	if err != nil && !os.IsExist(err) {
+		return err
+	}
+
 	// Iterate all user's notifications.
 	fis, err := vfsutil.ReadDir(ctx, s.fs, notificationsDir(currentUser))
 	if os.IsNotExist(err) {
@@ -257,8 +322,9 @@ func (s service) MarkAllRead(ctx context.Context, repo notifications.RepoSpec) e
 			continue
 		}
 
-		// TODO: Move notification instead of outright removing, maybe?
-		err = s.fs.RemoveAll(ctx, notificationPath(currentUser, notificationKey(repo, n.AppID, n.ThreadID)))
+		// Move notification to read directory.
+		key := notificationKey(repo, n.AppID, n.ThreadID)
+		err = s.fs.Rename(ctx, notificationPath(currentUser, key), readPath(currentUser, key))
 		if err != nil {
 			return err
 		}

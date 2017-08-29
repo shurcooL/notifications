@@ -102,7 +102,10 @@ type notification struct {
 // Tree layout:
 //
 // 	root
-// 	├── notifications
+// 	├── notifications - unread notifications only
+// 	│   └── userSpec
+// 	│       └── domain.com-path-appID-threadID - encoded notification
+// 	├── read - read notifications only
 // 	│   └── userSpec
 // 	│       └── domain.com-path-appID-threadID - encoded notification
 // 	└── subscribers
@@ -125,6 +128,14 @@ func notificationsDir(user users.UserSpec) string {
 
 func notificationPath(user users.UserSpec, key string) string {
 	return path.Join(notificationsDir(user), key)
+}
+
+func readDir(user users.UserSpec) string {
+	return path.Join("read", marshalUserSpec(user))
+}
+
+func readPath(user users.UserSpec, key string) string {
+	return path.Join(readDir(user), key)
 }
 
 func notificationKey(repo notifications.RepoSpec, appID string, threadID uint64) string {

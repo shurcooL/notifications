@@ -48,6 +48,9 @@ type CopierFrom interface {
 type ListOptions struct {
 	// Repo is an optional filter. If not nil, only notifications from Repo will be listed.
 	Repo *RepoSpec
+
+	// All specifies whether to include read notifications in addition to unread ones.
+	All bool
 }
 
 // Notification represents a notification.
@@ -61,6 +64,7 @@ type Notification struct {
 	Color     RGB
 	Actor     users.User
 	UpdatedAt time.Time
+	Read      bool
 	HTMLURL   string // Address of notification target.
 
 	Participating bool // Whether user is participating in the thread, or just watching.
@@ -71,8 +75,8 @@ type NotificationRequest struct {
 	Title     string
 	Icon      OcticonID
 	Color     RGB
-	Actor     users.UserSpec // Actor that triggered the notification.
-	UpdatedAt time.Time      // TODO: Maybe not needed? Why not use time.Now()?
+	Actor     users.UserSpec // Actor that triggered the notification. TODO: Maybe not needed? Why not use current user?
+	UpdatedAt time.Time      // TODO: Maybe not needed? Why not use time.Now()? Could do it, but time.Now() will be slightly later than original request time.
 	HTMLURL   string         // Address of notification target.
 }
 

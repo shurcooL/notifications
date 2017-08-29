@@ -37,7 +37,10 @@ type service struct {
 func (s service) List(ctx context.Context, opt notifications.ListOptions) (notifications.Notifications, error) {
 	var ns []notifications.Notification
 
-	ghOpt := &github.NotificationListOptions{ListOptions: github.ListOptions{PerPage: 100}}
+	ghOpt := &github.NotificationListOptions{
+		All:         opt.All,
+		ListOptions: github.ListOptions{PerPage: 100},
+	}
 	var ghNotifications []*github.Notification
 	switch opt.Repo {
 	case nil:
@@ -76,6 +79,7 @@ func (s service) List(ctx context.Context, opt notifications.ListOptions) (notif
 			RepoURL:   "https://github.com/" + *n.Repository.FullName,
 			Title:     *n.Subject.Title,
 			UpdatedAt: *n.UpdatedAt,
+			Read:      !*n.Unread,
 
 			Participating: *n.Reason != "subscribed", // According to https://developer.github.com/v3/activity/notifications/#notification-reasons, "subscribed" reason means "you're watching the repository", and all other reasons imply participation.
 		}
