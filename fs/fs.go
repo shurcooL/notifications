@@ -114,6 +114,18 @@ func (s service) List(ctx context.Context, opt notifications.ListOptions) (notif
 				HTMLURL:   n.HTMLURL,
 			})
 		}
+
+		// THINK: Consider using the dir-less vfs abstraction for doing this implicitly? Less code here.
+		// If the user has no more read notifications left, remove the empty directory.
+		switch notifications, err := vfsutil.ReadDir(ctx, s.fs, readDir(currentUser)); {
+		case err != nil && !os.IsNotExist(err):
+			return nil, err
+		case err == nil && len(notifications) == 0:
+			err := s.fs.RemoveAll(ctx, readDir(currentUser))
+			if err != nil {
+				return nil, err
+			}
+		}
 	}
 
 	return ns, nil
@@ -260,20 +272,26 @@ func (s service) MarkRead(ctx context.Context, appID string, repo notifications.
 		return os.ErrPermission
 	}
 
+	// Return early if the notification doesn't exist, before creating readDir for currentUser.
+	key := notificationKey(repo, appID, threadID)
+	_, err = vfsutil.Stat(ctx, s.fs, notificationPath(currentUser, key))
+	if os.IsNotExist(err) {
+		return nil
+	}
+
 	// Create readDir for currentUser in case it doesn't already exist.
 	err = s.fs.Mkdir(ctx, readDir(currentUser), 0755)
 	if err != nil && !os.IsExist(err) {
 		return err
 	}
 	// Move notification to read directory.
-	key := notificationKey(repo, appID, threadID)
 	err = s.fs.Rename(ctx, notificationPath(currentUser, key), readPath(currentUser, key))
 	if err != nil {
 		return err
 	}
 
 	// THINK: Consider using the dir-less vfs abstraction for doing this implicitly? Less code here.
-	// If the user has no more notifications left, remove their empty directory.
+	// If the user has no more unread notifications left, remove the empty directory.
 	switch notifications, err := vfsutil.ReadDir(ctx, s.fs, notificationsDir(currentUser)); {
 	case err != nil && !os.IsNotExist(err):
 		return err
@@ -296,12 +314,6 @@ func (s service) MarkAllRead(ctx context.Context, repo notifications.RepoSpec) e
 		return os.ErrPermission
 	}
 
-	// Create readDir for currentUser in case it doesn't already exist.
-	err = s.fs.Mkdir(ctx, readDir(currentUser), 0755)
-	if err != nil && !os.IsExist(err) {
-		return err
-	}
-
 	// Iterate all user's notifications.
 	fis, err := vfsutil.ReadDir(ctx, s.fs, notificationsDir(currentUser))
 	if os.IsNotExist(err) {
@@ -309,6 +321,7 @@ func (s service) MarkAllRead(ctx context.Context, repo notifications.RepoSpec) e
 	} else if err != nil {
 		return err
 	}
+	madeReadDir := false
 	for _, fi := range fis {
 		var n notification
 		err := jsonDecodeFile(ctx, s.fs, notificationPath(currentUser, fi.Name()), &n)
@@ -322,6 +335,14 @@ func (s service) MarkAllRead(ctx context.Context, repo notifications.RepoSpec) e
 			continue
 		}
 
+		// Create readDir for currentUser in case it doesn't already exist.
+		if !madeReadDir {
+			err = s.fs.Mkdir(ctx, readDir(currentUser), 0755)
+			if err != nil && !os.IsExist(err) {
+				return err
+			}
+			madeReadDir = true
+		}
 		// Move notification to read directory.
 		key := notificationKey(repo, n.AppID, n.ThreadID)
 		err = s.fs.Rename(ctx, notificationPath(currentUser, key), readPath(currentUser, key))
@@ -331,7 +352,7 @@ func (s service) MarkAllRead(ctx context.Context, repo notifications.RepoSpec) e
 	}
 
 	// THINK: Consider using the dir-less vfs abstraction for doing this implicitly? Less code here.
-	// If the user has no more notifications left, remove their empty directory.
+	// If the user has no more unread notifications left, remove the empty directory.
 	switch notifications, err := vfsutil.ReadDir(ctx, s.fs, notificationsDir(currentUser)); {
 	case err != nil && !os.IsNotExist(err):
 		return err
