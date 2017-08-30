@@ -6,11 +6,13 @@ import (
 	"fmt"
 	"log"
 	"net/url"
+	"reflect"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/google/go-github/github"
+	"github.com/google/go-querystring/query"
 	"github.com/shurcooL/notifications"
 	"github.com/shurcooL/users"
 )
@@ -22,17 +24,16 @@ import (
 // Caching can't be used for Activity.ListNotifications until GitHub API fixes the
 // odd behavior of returning 304 even when some notifications get marked as read.
 // Otherwise read notifications remain forever (until a new notification comes in).
-// That's why we need clientNoCache.
-func NewService(clientNoCache *github.Client, client *github.Client) notifications.Service {
+//
+// This service uses Cache-Control: no-cache request header to disable caching.
+func NewService(client *github.Client) notifications.Service {
 	return service{
-		clNoCache: clientNoCache,
-		cl:        client,
+		cl: client,
 	}
 }
 
 type service struct {
-	clNoCache *github.Client // TODO: Start using cache whenever possible, remove this.
-	cl        *github.Client
+	cl *github.Client
 }
 
 func (s service) List(ctx context.Context, opt notifications.ListOptions) (notifications.Notifications, error) {
@@ -46,7 +47,7 @@ func (s service) List(ctx context.Context, opt notifications.ListOptions) (notif
 	switch opt.Repo {
 	case nil:
 		for {
-			ns, resp, err := s.clNoCache.Activity.ListNotifications(ctx, ghOpt)
+			ns, resp, err := ghListNotifications(ctx, s.cl, ghOpt, false)
 			if err != nil {
 				return nil, err
 			}
@@ -62,7 +63,7 @@ func (s service) List(ctx context.Context, opt notifications.ListOptions) (notif
 			return nil, err
 		}
 		for {
-			ns, resp, err := s.clNoCache.Activity.ListRepositoryNotifications(ctx, repo.Owner, repo.Repo, ghOpt)
+			ns, resp, err := ghListRepositoryNotifications(ctx, s.cl, repo.Owner, repo.Repo, ghOpt, false)
 			if err != nil {
 				return nil, err
 			}
@@ -178,7 +179,7 @@ func (s service) List(ctx context.Context, opt notifications.ListOptions) (notif
 
 func (s service) Count(ctx context.Context, opt interface{}) (uint64, error) {
 	ghOpt := &github.NotificationListOptions{ListOptions: github.ListOptions{PerPage: 1}}
-	ghNotifications, resp, err := s.clNoCache.Activity.ListNotifications(ctx, ghOpt)
+	ghNotifications, resp, err := ghListNotifications(ctx, s.cl, ghOpt, false)
 	if err != nil {
 		return 0, err
 	}
@@ -492,4 +493,68 @@ func avatarURLSize(avatarURL string, size int) string {
 	q.Set("s", fmt.Sprint(size))
 	u.RawQuery = q.Encode()
 	return u.String()
+}
+
+// TODO: Start using cache whenever possible, remove these.
+
+// ghListNotifications is like github.Client.Activity.ListNotifications,
+// but gives caller control over whether cache can be used.
+func ghListNotifications(ctx context.Context, cl *github.Client, opt *github.NotificationListOptions, cache bool) ([]*github.Notification, *github.Response, error) {
+	u := fmt.Sprintf("notifications")
+	u, err := ghAddOptions(u, opt)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	req, err := cl.NewRequest("GET", u, nil)
+	if err != nil {
+		return nil, nil, err
+	}
+	if !cache {
+		req.Header.Set("Cache-Control", "no-cache")
+	}
+
+	var notifications []*github.Notification
+	resp, err := cl.Do(ctx, req, &notifications)
+	return notifications, resp, err
+}
+
+// ghListRepositoryNotifications is like github.Client.Activity.ListRepositoryNotifications,
+// but gives caller control over whether cache can be used.
+func ghListRepositoryNotifications(ctx context.Context, cl *github.Client, owner, repo string, opt *github.NotificationListOptions, cache bool) ([]*github.Notification, *github.Response, error) {
+	u := fmt.Sprintf("repos/%v/%v/notifications", owner, repo)
+	u, err := ghAddOptions(u, opt)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	req, err := cl.NewRequest("GET", u, nil)
+	if err != nil {
+		return nil, nil, err
+	}
+	if !cache {
+		req.Header.Set("Cache-Control", "no-cache")
+	}
+
+	var notifications []*github.Notification
+	resp, err := cl.Do(ctx, req, &notifications)
+	return notifications, resp, err
+}
+
+// ghAddOptions adds the parameters in opt as URL query parameters to s.
+// opt must be a struct (or a pointer to one) whose fields may contain "url" tags.
+func ghAddOptions(s string, opt interface{}) (string, error) {
+	if v := reflect.ValueOf(opt); v.Kind() == reflect.Ptr && v.IsNil() {
+		return s, nil
+	}
+	u, err := url.Parse(s)
+	if err != nil {
+		return s, err
+	}
+	qs, err := query.Values(opt)
+	if err != nil {
+		return s, err
+	}
+	u.RawQuery = qs.Encode()
+	return u.String(), nil
 }
