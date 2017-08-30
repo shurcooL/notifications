@@ -13,6 +13,7 @@ import (
 
 	"github.com/google/go-github/github"
 	"github.com/google/go-querystring/query"
+	"github.com/gregjones/httpcache"
 	"github.com/shurcooL/githubql"
 	"github.com/shurcooL/notifications"
 	"github.com/shurcooL/users"
@@ -27,6 +28,8 @@ import (
 // Otherwise read notifications remain forever (until a new notification comes in).
 //
 // This service uses Cache-Control: no-cache request header to disable caching.
+// Responses from cache must be marked with "X-From-Cache" header (i.e., the field
+// MarkCachedResponses in httpcache.Transport must be set to true).
 //
 // If router is nil, GitHubRouter is used, which links to https://github.com.
 func NewService(clientV3 *github.Client, clientV4 *githubql.Client, router Router) notifications.Service {
@@ -290,20 +293,27 @@ func (s service) Count(ctx context.Context, opt interface{}) (uint64, error) {
 }
 
 func (s service) MarkRead(ctx context.Context, rs notifications.RepoSpec, threadType string, threadID uint64) error {
-	if threadType == "Commit" || threadType == "Release" || threadType == "RepositoryInvitation" {
+	switch threadType {
+	case "Commit", "Release", "RepositoryInvitation":
 		_, err := s.clV3.Activity.MarkThreadRead(ctx, strconv.FormatUint(threadID, 10))
 		if err != nil {
 			return fmt.Errorf("MarkRead: failed to MarkThreadRead: %v", err)
 		}
 		return nil
-	}
+	case "Issue", "PullRequest":
+		// For these thread types, thread ID is not the notification ID, but rather the
+		// issue/PR number. We need to find a matching notification, if any exists.
+		// Handled below.
 
-	// Note: If we can always parse the notification ID (a numeric string like "230400425")
-	//       from GitHub into a uint64 reliably, then we can skip the whole list repo notifications
-	//       and match stuff dance, and just do Activity.MarkThreadRead(ctx, threadID) directly...
-	// Update: Not quite. We need to return actual issue IDs as ThreadIDs in List, so that
-	//         issuesapp.augmentUnread works correctly. But maybe if we can store it in another
-	//         field...
+		// Note: If we can always parse the notification ID (a numeric string like "230400425")
+		//       from GitHub into a uint64 reliably, then we can skip the whole list repo notifications
+		//       and match stuff dance, and just do Activity.MarkThreadRead(ctx, threadID) directly...
+		// Update: Not quite. We need to return actual issue IDs as ThreadIDs in List, so that
+		//         issuesapp.augmentUnread works correctly. But maybe if we can store it in another
+		//         field...
+	default:
+		return fmt.Errorf("MarkRead: unsupported threadType: %v", threadType)
+	}
 
 	repo, err := ghRepoSpec(rs)
 	if err != nil {
@@ -311,44 +321,98 @@ func (s service) MarkRead(ctx context.Context, rs notifications.RepoSpec, thread
 	}
 	// It's okay to use with-cache client here, because we don't mind seeing read notifications
 	// for the purposes of MarkRead. They'll be skipped if the notification ID doesn't match.
-	ns, _, err := s.clV3.Activity.ListRepositoryNotifications(ctx, repo.Owner, repo.Repo, nil)
+	cached, resp, err := ghListRepositoryNotifications(ctx, s.clV3, repo.Owner, repo.Repo, nil, true)
 	if err != nil {
 		return fmt.Errorf("failed to ListRepositoryNotifications: %v", err)
 	}
+	n, err := findNotification(cached, threadType, threadID)
+	if err != nil {
+		return err
+	}
+	// However, there are sometimes caching issues causing stale repository notifications
+	// to be retrieved from cache, and a legitimate existing notification is not marked read.
+	// So fall back to skipping cache, if we can't find a notification and the response
+	// we got was from cache (rather than origin server).
+	if _, fromCache := resp.Response.Header[httpcache.XFromCache]; n == nil && fromCache {
+		uncached, _, err := ghListRepositoryNotifications(ctx, s.clV3, repo.Owner, repo.Repo, nil, false)
+		if err != nil {
+			return fmt.Errorf("failed to ListRepositoryNotifications: %v", err)
+		}
+		n, err = findNotification(uncached, threadType, threadID)
+		if err != nil {
+			return err
+		}
+
+		if n != nil {
+			log.Printf(`MarkRead: did not find notification %s/%s %s %d within cached
+%d notifications:
+%s
+but did find within uncached
+%d notifications:
+%s
+`, repo.Owner, repo.Repo, threadType, threadID, len(cached), notificationsString(cached), len(uncached), notificationsString(uncached))
+		}
+	}
+	switch n {
+	default:
+		// Found a matching notification, mark it read.
+		_, err = s.clV3.Activity.MarkThreadRead(ctx, *n.ID)
+		if err != nil {
+			return fmt.Errorf("MarkRead: failed to MarkThreadRead: %v", err)
+		}
+		return nil
+	case nil:
+		// Didn't find any matching notification to mark read.
+		// Nothing to do.
+		return nil
+	}
+}
+
+// findNotification tries to find a notification that matches
+// the provided threadType and threadID.
+// threadType must be one of "Issue" or "PullRequest".
+// It returns nil if no matching notification is found, and
+// any error encountered.
+func findNotification(ns []*github.Notification, threadType string, threadID uint64) (*github.Notification, error) {
 	for _, n := range ns {
 		if *n.Subject.Type != threadType {
+			// Mismatched thread type.
 			continue
 		}
 
 		var id uint64
 		switch *n.Subject.Type {
 		case "Issue":
+			var err error
 			_, id, err = parseIssueSpec(*n.Subject.URL)
 			if err != nil {
-				return fmt.Errorf("failed to parseIssueSpec: %v", err)
+				return nil, fmt.Errorf("failed to parseIssueSpec: %v", err)
 			}
 		case "PullRequest":
+			var err error
 			_, id, err = parsePullRequestSpec(*n.Subject.URL)
 			if err != nil {
-				return fmt.Errorf("failed to parsePullRequestSpec: %v", err)
+				return nil, fmt.Errorf("failed to parsePullRequestSpec: %v", err)
 			}
-		case "Commit", "Release", "RepositoryInvitation":
-			// These thread types are already handled on top, so skip them.
-			continue
-		default:
-			return fmt.Errorf("MarkRead: unsupported *n.Subject.Type: %v", *n.Subject.Type)
 		}
 		if id != threadID {
+			// Mismatched thread ID.
 			continue
 		}
 
-		_, err = s.clV3.Activity.MarkThreadRead(ctx, *n.ID)
-		if err != nil {
-			return fmt.Errorf("MarkRead: failed to MarkThreadRead: %v", err)
-		}
-		return nil
+		// Found a matching notification.
+		return n, nil
 	}
-	return nil
+	return nil, nil
+}
+
+// notificationsString returns a string representation of notifications ns.
+func notificationsString(ns []*github.Notification) string {
+	var ss []string
+	for _, n := range ns {
+		ss = append(ss, "\t"+strings.TrimPrefix(*n.Subject.URL, "https://api.github.com/"))
+	}
+	return strings.Join(ss, "\n")
 }
 
 func (s service) MarkAllRead(ctx context.Context, rs notifications.RepoSpec) error {

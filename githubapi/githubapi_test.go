@@ -27,3 +27,36 @@ func TestAvatarURLSize(t *testing.T) {
 		t.Errorf("got %q, want %q", got, want)
 	}
 }
+
+func TestNotificationsString(t *testing.T) {
+	ns := []*github.Notification{
+		{
+			Subject: &github.NotificationSubject{
+				URL:  github.String("https://api.github.com/repos/neugram/ng/issues/10"),
+				Type: github.String("Issue"),
+			},
+			ID: github.String("271670023"),
+		},
+		{
+			Subject: &github.NotificationSubject{
+				URL:  github.String("https://api.github.com/repos/neugram/ng/pulls/22"),
+				Type: github.String("PullRequest"),
+			},
+			ID: github.String("271863360"),
+		},
+		{
+			Subject: &github.NotificationSubject{
+				URL:  github.String("https://api.github.com/repos/neugram/ng/pulls/21"),
+				Type: github.String("PullRequest"),
+			},
+			ID: github.String("271857043"),
+		},
+	}
+	got := notificationsString(ns)
+	want := `	repos/neugram/ng/issues/10
+	repos/neugram/ng/pulls/22
+	repos/neugram/ng/pulls/21`
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
