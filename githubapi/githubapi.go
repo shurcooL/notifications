@@ -16,7 +16,8 @@ import (
 )
 
 // NewService creates a GitHub-backed notifications.Service using given GitHub clients.
-// At this time it infers the current user from the client (its authentication info), and cannot be used to serve multiple users.
+// At this time it infers the current user from the client (its authentication info),
+// and cannot be used to serve multiple users.
 //
 // Caching can't be used for Activity.ListNotifications until GitHub API fixes the
 // odd behavior of returning 304 even when some notifications get marked as read.
@@ -247,16 +248,7 @@ func (s service) MarkRead(ctx context.Context, appID string, rs notifications.Re
 		}
 		return nil
 	}
-	return fmt.Errorf("MarkRead: did not find notification %s/%d within %d notifications of repo %s:\n%v", appID, threadID, len(ns), rs.URI, notificationsString(ns))
-}
-
-// notificationsString returns a string representation of notifications ns.
-func notificationsString(ns []*github.Notification) string {
-	var ss []string
-	for _, n := range ns {
-		ss = append(ss, fmt.Sprintf("%v\t%v/%v", strings.TrimPrefix(*n.Subject.URL, "https://api.github.com/"), *n.Subject.Type, *n.ID))
-	}
-	return strings.Join(ss, "\n")
+	return nil
 }
 
 func (s service) MarkAllRead(ctx context.Context, rs notifications.RepoSpec) error {
@@ -266,7 +258,7 @@ func (s service) MarkAllRead(ctx context.Context, rs notifications.RepoSpec) err
 	}
 	_, err = s.cl.Activity.MarkRepositoryNotificationsRead(ctx, repo.Owner, repo.Repo, time.Now())
 	if err != nil {
-		return fmt.Errorf("failed to MarkRepositoryNotificationsRead: %v", err)
+		return fmt.Errorf("MarkAllRead: failed to MarkRepositoryNotificationsRead: %v", err)
 	}
 	return nil
 }
