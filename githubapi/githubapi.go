@@ -1,4 +1,4 @@
-// Package githubapi implements notifications.Service using GitHub API client.
+// Package githubapi implements notifications.Service using GitHub API clients.
 package githubapi
 
 import (
@@ -13,6 +13,7 @@ import (
 
 	"github.com/google/go-github/github"
 	"github.com/google/go-querystring/query"
+	"github.com/shurcooL/githubql"
 	"github.com/shurcooL/notifications"
 	"github.com/shurcooL/users"
 )
@@ -21,19 +22,21 @@ import (
 // At this time it infers the current user from the client (its authentication info),
 // and cannot be used to serve multiple users.
 //
-// Caching can't be used for Activity.ListNotifications until GitHub API fixes the
+// Caching can't be used for Activity.ListNotifications until GitHub REST API v3 fixes the
 // odd behavior of returning 304 even when some notifications get marked as read.
 // Otherwise read notifications remain forever (until a new notification comes in).
 //
 // This service uses Cache-Control: no-cache request header to disable caching.
-func NewService(client *github.Client) notifications.Service {
+func NewService(clientV3 *github.Client, clientV4 *githubql.Client) notifications.Service {
 	return service{
-		cl: client,
+		clV3: clientV3,
+		clV4: clientV4,
 	}
 }
 
 type service struct {
-	cl *github.Client
+	clV3 *github.Client   // GitHub REST API v3 client.
+	clV4 *githubql.Client // GitHub GraphQL API v4 client.
 }
 
 func (s service) List(ctx context.Context, opt notifications.ListOptions) (notifications.Notifications, error) {
@@ -47,7 +50,7 @@ func (s service) List(ctx context.Context, opt notifications.ListOptions) (notif
 	switch opt.Repo {
 	case nil:
 		for {
-			ns, resp, err := ghListNotifications(ctx, s.cl, ghOpt, false)
+			ns, resp, err := ghListNotifications(ctx, s.clV3, ghOpt, false)
 			if err != nil {
 				return nil, err
 			}
@@ -63,7 +66,7 @@ func (s service) List(ctx context.Context, opt notifications.ListOptions) (notif
 			return nil, err
 		}
 		for {
-			ns, resp, err := ghListRepositoryNotifications(ctx, s.cl, repo.Owner, repo.Repo, ghOpt, false)
+			ns, resp, err := ghListRepositoryNotifications(ctx, s.clV3, repo.Owner, repo.Repo, ghOpt, false)
 			if err != nil {
 				return nil, err
 			}
@@ -86,55 +89,115 @@ func (s service) List(ctx context.Context, opt notifications.ListOptions) (notif
 			Participating: *n.Reason != "subscribed", // According to https://developer.github.com/v3/activity/notifications/#notification-reasons, "subscribed" reason means "you're watching the repository", and all other reasons imply participation.
 		}
 
-		// This makes a single API call. It's relatively slow/expensive
-		// because it happens in the ghNotifications loop.
-		if actor, err := s.getNotificationActor(ctx, *n.Subject); err == nil {
-			notification.Actor = actor
-		}
+		// TODO: We're inside range ghNotifications loop here, and doing a single
+		//       GraphQL query for each Issue/PR. It would be better to combine
+		//       all the individual queries into a single GraphQL query and execute
+		//       that in one request instead. Need to come up with a good way of making
+		//       this possible. See https://github.com/shurcooL/githubql/issues/17.
 
 		switch *n.Subject.Type {
 		case "Issue":
+			// This makes a single GraphQL API call. It's relatively slow/expensive
+			// because it happens in the ghNotifications loop.
+
 			rs, issueID, err := parseIssueSpec(*n.Subject.URL)
 			if err != nil {
 				return ns, err
 			}
 			notification.ThreadID = issueID
-			switch state, err := s.getIssueState(ctx, *n.Subject.URL); {
-			case err == nil && state == "open":
-				notification.Icon = "issue-opened"
-				notification.Color = notifications.RGB{R: 0x6c, G: 0xc6, B: 0x44} // Green.
-			case err == nil && state == "closed":
-				notification.Icon = "issue-closed"
-				notification.Color = notifications.RGB{R: 0xbd, G: 0x2c, B: 0x00} // Red.
-			default:
-				notification.Icon = "issue-opened"
+			var q struct {
+				Repository struct {
+					Issue struct {
+						State    githubql.IssueState
+						Author   githubqlActor
+						Comments struct {
+							Nodes []struct {
+								Author     githubqlActor
+								DatabaseID githubql.Int
+							}
+						} `graphql:"comments(last:1)"`
+					} `graphql:"issue(number:$issueNumber)"`
+				} `graphql:"repository(owner:$repositoryOwner,name:$repositoryName)"`
 			}
-			notification.HTMLURL, err = getIssueURL(rs, issueID, n.Subject.LatestCommentURL)
+			variables := map[string]interface{}{
+				"repositoryOwner": githubql.String(rs.Owner),
+				"repositoryName":  githubql.String(rs.Repo),
+				"issueNumber":     githubql.Int(issueID),
+			}
+			err = s.clV4.Query(ctx, &q, variables)
 			if err != nil {
 				return ns, err
 			}
+			switch q.Repository.Issue.State {
+			case githubql.IssueStateOpen:
+				notification.Icon = "issue-opened"
+				notification.Color = notifications.RGB{R: 0x6c, G: 0xc6, B: 0x44} // Green.
+			case githubql.IssueStateClosed:
+				notification.Icon = "issue-closed"
+				notification.Color = notifications.RGB{R: 0xbd, G: 0x2c, B: 0x00} // Red.
+			}
+			switch len(q.Repository.Issue.Comments.Nodes) {
+			case 0:
+				notification.Actor = ghActor(q.Repository.Issue.Author)
+				notification.HTMLURL = getIssueURL(rs, issueID, 0)
+			case 1:
+				notification.Actor = ghActor(q.Repository.Issue.Comments.Nodes[0].Author)
+				notification.HTMLURL = getIssueURL(rs, issueID, q.Repository.Issue.Comments.Nodes[0].DatabaseID)
+			}
 		case "PullRequest":
+			// This makes a single GraphQL API call. It's relatively slow/expensive
+			// because it happens in the ghNotifications loop.
+
 			rs, prID, err := parsePullRequestSpec(*n.Subject.URL)
 			if err != nil {
 				return ns, err
 			}
 			notification.ThreadID = prID
-			notification.Icon = "git-pull-request"
-			switch state, err := s.getPullRequestState(ctx, *n.Subject.URL); {
-			case err == nil && state == "open":
-				notification.Color = notifications.RGB{R: 0x6c, G: 0xc6, B: 0x44} // Green.
-			case err == nil && state == "closed":
-				notification.Color = notifications.RGB{R: 0xbd, G: 0x2c, B: 0x00} // Red.
-			case err == nil && state == "merged":
-				notification.Color = notifications.RGB{R: 0x6e, G: 0x54, B: 0x94} // Purple.
-			default:
-				log.Println("githubapi.service.List: getPullRequestState:", err)
+			var q struct {
+				Repository struct {
+					PullRequest struct {
+						State    githubql.PullRequestState
+						Author   githubqlActor
+						Comments struct {
+							Nodes []struct {
+								Author     githubqlActor
+								DatabaseID githubql.Int
+							}
+						} `graphql:"comments(last:1)"`
+					} `graphql:"pullRequest(number:$prNumber)"`
+				} `graphql:"repository(owner:$repositoryOwner,name:$repositoryName)"`
 			}
-			notification.HTMLURL, err = getPullRequestURL(rs, prID, n.Subject.LatestCommentURL)
+			variables := map[string]interface{}{
+				"repositoryOwner": githubql.String(rs.Owner),
+				"repositoryName":  githubql.String(rs.Repo),
+				"prNumber":        githubql.Int(prID),
+			}
+			err = s.clV4.Query(ctx, &q, variables)
 			if err != nil {
 				return ns, err
 			}
+			notification.Icon = "git-pull-request"
+			switch q.Repository.PullRequest.State {
+			case githubql.PullRequestStateOpen:
+				notification.Color = notifications.RGB{R: 0x6c, G: 0xc6, B: 0x44} // Green.
+			case githubql.PullRequestStateClosed:
+				notification.Color = notifications.RGB{R: 0xbd, G: 0x2c, B: 0x00} // Red.
+			case githubql.PullRequestStateMerged:
+				notification.Color = notifications.RGB{R: 0x6e, G: 0x54, B: 0x94} // Purple.
+			}
+			switch len(q.Repository.PullRequest.Comments.Nodes) {
+			case 0:
+				notification.Actor = ghActor(q.Repository.PullRequest.Author)
+				notification.HTMLURL = getPullRequestURL(rs, prID, 0)
+			case 1:
+				notification.Actor = ghActor(q.Repository.PullRequest.Comments.Nodes[0].Author)
+				notification.HTMLURL = getPullRequestURL(rs, prID, q.Repository.PullRequest.Comments.Nodes[0].DatabaseID)
+			}
 		case "Commit":
+			// getNotificationActor makes a single API call. It's relatively slow/expensive
+			// because it happens in the ghNotifications loop.
+			// TODO: Fetch using GraphQL.
+
 			id, err := strconv.ParseUint(*n.ID, 10, 64)
 			if err != nil {
 				return ns, fmt.Errorf("notifications/githubapi: failed to parse Commit notification ID %q to uint64: %v", *n.ID, err)
@@ -142,11 +205,19 @@ func (s service) List(ctx context.Context, opt notifications.ListOptions) (notif
 			notification.ThreadID = id
 			notification.Icon = "git-commit"
 			notification.Color = notifications.RGB{R: 0x76, G: 0x76, B: 0x76} // Gray.
+			notification.Actor, err = s.getNotificationActor(ctx, *n.Subject)
+			if err != nil {
+				return ns, err
+			}
 			notification.HTMLURL, err = getCommitURL(*n.Subject)
 			if err != nil {
 				return ns, err
 			}
 		case "Release":
+			// getNotificationActor and getReleaseURL make two API calls. It's relatively slow/expensive
+			// because it happens in the ghNotifications loop.
+			// TODO: Fetch using GraphQL.
+
 			id, err := strconv.ParseUint(*n.ID, 10, 64)
 			if err != nil {
 				return ns, fmt.Errorf("notifications/githubapi: failed to parse Release notification ID %q to uint64: %v", *n.ID, err)
@@ -154,11 +225,19 @@ func (s service) List(ctx context.Context, opt notifications.ListOptions) (notif
 			notification.ThreadID = id
 			notification.Icon = "tag"
 			notification.Color = notifications.RGB{R: 0x76, G: 0x76, B: 0x76} // Gray.
+			notification.Actor, err = s.getNotificationActor(ctx, *n.Subject)
+			if err != nil {
+				return ns, err
+			}
 			notification.HTMLURL, err = s.getReleaseURL(ctx, *n.Subject.URL)
 			if err != nil {
 				return ns, err
 			}
 		case "RepositoryInvitation":
+			// getNotificationActor makes a single API call. It's relatively slow/expensive
+			// because it happens in the ghNotifications loop.
+			// TODO: Fetch using GraphQL.
+
 			id, err := strconv.ParseUint(*n.ID, 10, 64)
 			if err != nil {
 				return ns, fmt.Errorf("notifications/githubapi: failed to parse RepositoryInvitation notification ID %q to uint64: %v", *n.ID, err)
@@ -166,6 +245,10 @@ func (s service) List(ctx context.Context, opt notifications.ListOptions) (notif
 			notification.ThreadID = id
 			notification.Icon = "mail"
 			notification.Color = notifications.RGB{R: 0x76, G: 0x76, B: 0x76} // Gray.
+			notification.Actor, err = s.getNotificationActor(ctx, *n.Subject)
+			if err != nil {
+				return ns, err
+			}
 			notification.HTMLURL = "https://github.com/" + *n.Repository.FullName + "/invitations"
 		default:
 			log.Printf("unsupported *n.Subject.Type: %q\n", *n.Subject.Type)
@@ -179,7 +262,7 @@ func (s service) List(ctx context.Context, opt notifications.ListOptions) (notif
 
 func (s service) Count(ctx context.Context, opt interface{}) (uint64, error) {
 	ghOpt := &github.NotificationListOptions{ListOptions: github.ListOptions{PerPage: 1}}
-	ghNotifications, resp, err := ghListNotifications(ctx, s.cl, ghOpt, false)
+	ghNotifications, resp, err := ghListNotifications(ctx, s.clV3, ghOpt, false)
 	if err != nil {
 		return 0, err
 	}
@@ -192,7 +275,7 @@ func (s service) Count(ctx context.Context, opt interface{}) (uint64, error) {
 
 func (s service) MarkRead(ctx context.Context, appID string, rs notifications.RepoSpec, threadID uint64) error {
 	if appID == "Commit" || appID == "Release" || appID == "RepositoryInvitation" {
-		_, err := s.cl.Activity.MarkThreadRead(ctx, strconv.FormatUint(threadID, 10))
+		_, err := s.clV3.Activity.MarkThreadRead(ctx, strconv.FormatUint(threadID, 10))
 		if err != nil {
 			return fmt.Errorf("MarkRead: failed to MarkThreadRead: %v", err)
 		}
@@ -212,7 +295,7 @@ func (s service) MarkRead(ctx context.Context, appID string, rs notifications.Re
 	}
 	// It's okay to use with-cache client here, because we don't mind seeing read notifications
 	// for the purposes of MarkRead. They'll be skipped if the notification ID doesn't match.
-	ns, _, err := s.cl.Activity.ListRepositoryNotifications(ctx, repo.Owner, repo.Repo, nil)
+	ns, _, err := s.clV3.Activity.ListRepositoryNotifications(ctx, repo.Owner, repo.Repo, nil)
 	if err != nil {
 		return fmt.Errorf("failed to ListRepositoryNotifications: %v", err)
 	}
@@ -243,7 +326,7 @@ func (s service) MarkRead(ctx context.Context, appID string, rs notifications.Re
 			continue
 		}
 
-		_, err = s.cl.Activity.MarkThreadRead(ctx, *n.ID)
+		_, err = s.clV3.Activity.MarkThreadRead(ctx, *n.ID)
 		if err != nil {
 			return fmt.Errorf("MarkRead: failed to MarkThreadRead: %v", err)
 		}
@@ -257,7 +340,7 @@ func (s service) MarkAllRead(ctx context.Context, rs notifications.RepoSpec) err
 	if err != nil {
 		return err
 	}
-	_, err = s.cl.Activity.MarkRepositoryNotificationsRead(ctx, repo.Owner, repo.Repo, time.Now())
+	_, err = s.clV3.Activity.MarkRepositoryNotificationsRead(ctx, repo.Owner, repo.Repo, time.Now())
 	if err != nil {
 		return fmt.Errorf("MarkAllRead: failed to MarkRepositoryNotificationsRead: %v", err)
 	}
@@ -276,7 +359,8 @@ func (s service) Subscribe(ctx context.Context, appID string, repo notifications
 
 // getNotificationActor tries to follow the LatestCommentURL, if not-nil,
 // to fetch an object that contains a User or Author, who is taken to be
-// the actor that triggered the notification.
+// the actor that triggered the notification. It returns an error only if
+// something unexpected happened.
 func (s service) getNotificationActor(ctx context.Context, subject github.NotificationSubject) (users.User, error) {
 	var apiURL string
 	if subject.LatestCommentURL != nil {
@@ -287,17 +371,17 @@ func (s service) getNotificationActor(ctx context.Context, subject github.Notifi
 	} else {
 		// This can happen if the event comes from a private repository
 		// and we don't have any API URL values for it.
-		return users.User{}, fmt.Errorf("subject API URLs not present")
+		return users.User{}, nil
 	}
-	req, err := s.cl.NewRequest("GET", apiURL, nil)
+	req, err := s.clV3.NewRequest("GET", apiURL, nil)
 	if err != nil {
 		return users.User{}, err
 	}
-	n := new(struct {
+	var n struct {
 		User   *github.User
 		Author *github.User
-	})
-	_, err = s.cl.Do(ctx, req, n)
+	}
+	_, err = s.clV3.Do(ctx, req, &n)
 	if err != nil {
 		return users.User{}, err
 	}
@@ -311,57 +395,20 @@ func (s service) getNotificationActor(ctx context.Context, subject github.Notifi
 	}
 }
 
-func (s service) getIssueState(ctx context.Context, issueAPIURL string) (string, error) {
-	req, err := s.cl.NewRequest("GET", issueAPIURL, nil)
-	if err != nil {
-		return "", err
-	}
-	issue := new(github.Issue)
-	_, err = s.cl.Do(ctx, req, issue)
-	if err != nil {
-		return "", err
-	}
-	if issue.State == nil {
-		return "", fmt.Errorf("for some reason issue.State is nil for %q: %v", issueAPIURL, issue)
-	}
-	return *issue.State, nil
-}
-
-func (s service) getPullRequestState(ctx context.Context, prAPIURL string) (string, error) {
-	req, err := s.cl.NewRequest("GET", prAPIURL, nil)
-	if err != nil {
-		return "", err
-	}
-	pr := new(github.PullRequest)
-	_, err = s.cl.Do(ctx, req, pr)
-	if err != nil {
-		return "", err
-	}
-	if pr.State == nil || pr.Merged == nil {
-		return "", fmt.Errorf("for some reason pr.State or pr.Merged is nil for %q: %v", prAPIURL, pr)
-	}
-	switch {
-	default:
-		return *pr.State, nil
-	case *pr.Merged:
-		return "merged", nil
-	}
-}
-
-func getIssueURL(rs notifications.RepoSpec, issueID uint64, commentURL *string) (string, error) {
+func getIssueURL(rs repoSpec, issueID uint64, commentID githubql.Int) string {
 	var fragment string
-	if _, commentID, err := parseCommentSpec(commentURL); err == nil {
-		fragment = fmt.Sprintf("#comment-%d", commentID)
+	if commentID != 0 {
+		fragment = fmt.Sprintf("#issuecomment-%d", commentID)
 	}
-	return fmt.Sprintf("https://github.com/%s/issues/%d%s", rs.URI, issueID, fragment), nil
+	return fmt.Sprintf("https://github.com/%s/%s/issues/%d%s", rs.Owner, rs.Repo, issueID, fragment)
 }
 
-func getPullRequestURL(rs notifications.RepoSpec, prID uint64, commentURL *string) (string, error) {
+func getPullRequestURL(rs repoSpec, prID uint64, commentID githubql.Int) string {
 	var fragment string
-	if _, commentID, err := parseCommentSpec(commentURL); err == nil {
-		fragment = fmt.Sprintf("#comment-%d", commentID)
+	if commentID != 0 {
+		fragment = fmt.Sprintf("#issuecomment-%d", commentID)
 	}
-	return fmt.Sprintf("https://github.com/%s/pull/%d%s", rs.URI, prID, fragment), nil
+	return fmt.Sprintf("https://github.com/%s/%s/pull/%d%s", rs.Owner, rs.Repo, prID, fragment)
 }
 
 func getCommitURL(subject github.NotificationSubject) (string, error) {
@@ -369,86 +416,61 @@ func getCommitURL(subject github.NotificationSubject) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return fmt.Sprintf("https://github.com/%s/commit/%s", rs.URI, commit), nil
+	return fmt.Sprintf("https://github.com/%s/%s/commit/%s", rs.Owner, rs.Repo, commit), nil
 }
 
+// getReleaseURL makes a single API call to get the Release HTMLURL
+// from the given releaseAPIURL.
 func (s service) getReleaseURL(ctx context.Context, releaseAPIURL string) (string, error) {
-	req, err := s.cl.NewRequest("GET", releaseAPIURL, nil)
+	req, err := s.clV3.NewRequest("GET", releaseAPIURL, nil)
 	if err != nil {
 		return "", err
 	}
-	rr := new(github.RepositoryRelease)
-	_, err = s.cl.Do(ctx, req, rr)
+	var rr github.RepositoryRelease
+	_, err = s.clV3.Do(ctx, req, &rr)
 	if err != nil {
 		return "", err
 	}
 	return *rr.HTMLURL, nil
 }
 
-func parseIssueSpec(issueAPIURL string) (_ notifications.RepoSpec, issueID uint64, _ error) {
+func parseIssueSpec(issueAPIURL string) (_ repoSpec, issueID uint64, _ error) {
 	rs, id, err := parseSpec(issueAPIURL, "issues")
 	if err != nil {
-		return notifications.RepoSpec{}, 0, err
+		return repoSpec{}, 0, err
 	}
 	issueID, err = strconv.ParseUint(id, 10, 64)
 	if err != nil {
-		return notifications.RepoSpec{}, 0, err
+		return repoSpec{}, 0, err
 	}
 	return rs, issueID, nil
 }
 
-func parsePullRequestSpec(prAPIURL string) (_ notifications.RepoSpec, prID uint64, _ error) {
+func parsePullRequestSpec(prAPIURL string) (_ repoSpec, prID uint64, _ error) {
 	rs, id, err := parseSpec(prAPIURL, "pulls")
 	if err != nil {
-		return notifications.RepoSpec{}, 0, err
+		return repoSpec{}, 0, err
 	}
 	prID, err = strconv.ParseUint(id, 10, 64)
 	if err != nil {
-		return notifications.RepoSpec{}, 0, err
+		return repoSpec{}, 0, err
 	}
 	return rs, prID, nil
 }
 
-func parseSpec(apiURL, specType string) (_ notifications.RepoSpec, id string, _ error) {
+func parseSpec(apiURL, specType string) (_ repoSpec, id string, _ error) {
 	u, err := url.Parse(apiURL)
 	if err != nil {
-		return notifications.RepoSpec{}, "", err
+		return repoSpec{}, "", err
 	}
 	e := strings.Split(u.Path, "/")
 	if len(e) < 5 {
-		return notifications.RepoSpec{}, "", fmt.Errorf("unexpected path (too few elements): %q", u.Path)
+		return repoSpec{}, "", fmt.Errorf("unexpected path (too few elements): %q", u.Path)
 	}
 	if got, want := e[len(e)-2], specType; got != want {
-		return notifications.RepoSpec{}, "", fmt.Errorf("unexpected path element %q, expecting %q", got, want)
+		return repoSpec{}, "", fmt.Errorf("unexpected path element %q, expecting %q", got, want)
 	}
-	return notifications.RepoSpec{URI: e[len(e)-4] + "/" + e[len(e)-3]}, e[len(e)-1], nil
-}
-
-func parseCommentSpec(commentURL *string) (notifications.RepoSpec, int, error) {
-	if commentURL == nil {
-		// This can happen if the event comes from a private repository
-		// and we don't have a LatestCommentURL value for it.
-		return notifications.RepoSpec{}, 0, fmt.Errorf("comment URL not present")
-	}
-	u, err := url.Parse(*commentURL)
-	if err != nil {
-		return notifications.RepoSpec{}, 0, err
-	}
-	e := strings.Split(u.Path, "/")
-	if len(e) < 6 {
-		return notifications.RepoSpec{}, 0, fmt.Errorf("unexpected path (too few elements): %q", u.Path)
-	}
-	if got, want := e[len(e)-2], "comments"; got != want {
-		return notifications.RepoSpec{}, 0, fmt.Errorf("unexpected path element %q, expecting %q", got, want)
-	}
-	if got, want := e[len(e)-3], "issues"; got != want {
-		return notifications.RepoSpec{}, 0, fmt.Errorf("unexpected path element %q, expecting %q", got, want)
-	}
-	id, err := strconv.Atoi(e[len(e)-1])
-	if err != nil {
-		return notifications.RepoSpec{}, 0, err
-	}
-	return notifications.RepoSpec{URI: e[len(e)-5] + "/" + e[len(e)-4]}, id, nil
+	return repoSpec{Owner: e[len(e)-4], Repo: e[len(e)-3]}, e[len(e)-1], nil
 }
 
 type repoSpec struct {
@@ -469,6 +491,27 @@ func ghRepoSpec(repo notifications.RepoSpec) (repoSpec, error) {
 		Owner: ghOwnerRepo[1],
 		Repo:  ghOwnerRepo[2],
 	}, nil
+}
+
+type githubqlActor struct {
+	User struct {
+		DatabaseID uint64
+	} `graphql:"...on User"`
+	Login     string
+	AvatarURL string `graphql:"avatarUrl(size:36)"`
+	URL       string
+}
+
+func ghActor(actor githubqlActor) users.User {
+	return users.User{
+		UserSpec: users.UserSpec{
+			ID:     actor.User.DatabaseID,
+			Domain: "github.com",
+		},
+		Login:     actor.Login,
+		AvatarURL: actor.AvatarURL,
+		HTMLURL:   actor.URL,
+	}
 }
 
 func ghUser(user *github.User) users.User {
