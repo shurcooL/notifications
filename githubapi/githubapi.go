@@ -79,12 +79,11 @@ func (s service) List(ctx context.Context, opt notifications.ListOptions) (notif
 	}
 	for _, n := range ghNotifications {
 		notification := notifications.Notification{
-			AppID:     *n.Subject.Type,
-			RepoSpec:  notifications.RepoSpec{URI: "github.com/" + *n.Repository.FullName},
-			RepoURL:   "https://github.com/" + *n.Repository.FullName,
-			Title:     *n.Subject.Title,
-			UpdatedAt: *n.UpdatedAt,
-			Read:      !*n.Unread,
+			RepoSpec:   notifications.RepoSpec{URI: "github.com/" + *n.Repository.FullName},
+			ThreadType: *n.Subject.Type,
+			Title:      *n.Subject.Title,
+			UpdatedAt:  *n.UpdatedAt,
+			Read:       !*n.Unread,
 
 			Participating: *n.Reason != "subscribed", // According to https://developer.github.com/v3/activity/notifications/#notification-reasons, "subscribed" reason means "you're watching the repository", and all other reasons imply participation.
 		}
@@ -273,8 +272,8 @@ func (s service) Count(ctx context.Context, opt interface{}) (uint64, error) {
 	}
 }
 
-func (s service) MarkRead(ctx context.Context, appID string, rs notifications.RepoSpec, threadID uint64) error {
-	if appID == "Commit" || appID == "Release" || appID == "RepositoryInvitation" {
+func (s service) MarkRead(ctx context.Context, rs notifications.RepoSpec, threadType string, threadID uint64) error {
+	if threadType == "Commit" || threadType == "Release" || threadType == "RepositoryInvitation" {
 		_, err := s.clV3.Activity.MarkThreadRead(ctx, strconv.FormatUint(threadID, 10))
 		if err != nil {
 			return fmt.Errorf("MarkRead: failed to MarkThreadRead: %v", err)
@@ -300,7 +299,7 @@ func (s service) MarkRead(ctx context.Context, appID string, rs notifications.Re
 		return fmt.Errorf("failed to ListRepositoryNotifications: %v", err)
 	}
 	for _, n := range ns {
-		if *n.Subject.Type != appID {
+		if *n.Subject.Type != threadType {
 			continue
 		}
 
@@ -347,12 +346,12 @@ func (s service) MarkAllRead(ctx context.Context, rs notifications.RepoSpec) err
 	return nil
 }
 
-func (s service) Notify(ctx context.Context, appID string, repo notifications.RepoSpec, threadID uint64, op notifications.NotificationRequest) error {
+func (s service) Notify(ctx context.Context, repo notifications.RepoSpec, threadType string, threadID uint64, op notifications.NotificationRequest) error {
 	// Nothing to do. GitHub takes care of this on their end, even when creating comments/issues via API.
 	return nil
 }
 
-func (s service) Subscribe(ctx context.Context, appID string, repo notifications.RepoSpec, threadID uint64, subscribers []users.UserSpec) error {
+func (s service) Subscribe(ctx context.Context, repo notifications.RepoSpec, threadType string, threadID uint64, subscribers []users.UserSpec) error {
 	// Nothing to do. GitHub takes care of this on their end, even when creating comments/issues via API.
 	return nil
 }

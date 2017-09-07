@@ -28,13 +28,13 @@ type Service interface {
 // ExternalService for notifications.
 type ExternalService interface {
 	// Subscribe subscribes subscribers to the specified thread.
-	Subscribe(ctx context.Context, appID string, repo RepoSpec, threadID uint64, subscribers []users.UserSpec) error
+	Subscribe(ctx context.Context, repo RepoSpec, threadType string, threadID uint64, subscribers []users.UserSpec) error
 
 	// MarkRead marks the specified thread as read.
-	MarkRead(ctx context.Context, appID string, repo RepoSpec, threadID uint64) error
+	MarkRead(ctx context.Context, repo RepoSpec, threadType string, threadID uint64) error
 
 	// Notify notifies subscribers of the specified thread of a notification.
-	Notify(ctx context.Context, appID string, repo RepoSpec, threadID uint64, nr NotificationRequest) error
+	Notify(ctx context.Context, repo RepoSpec, threadType string, threadID uint64, nr NotificationRequest) error
 }
 
 // CopierFrom is an optional interface that allows copying notifications between services.
@@ -55,17 +55,16 @@ type ListOptions struct {
 
 // Notification represents a notification.
 type Notification struct {
-	AppID     string // TODO: Rename AppID to "ThreadType" and shuffle its order to make it more clear: (RepoURI, ThreadType, ThreadID).
-	RepoSpec  RepoSpec
-	ThreadID  uint64
-	RepoURL   string
-	Title     string
-	Icon      OcticonID // TODO: Some notifications can exist for a long time. OcticonID may change when frontend updates to newer versions of octicons. Think of a better long term solution?
-	Color     RGB
-	Actor     users.User
-	UpdatedAt time.Time
-	Read      bool
-	HTMLURL   string // Address of notification target.
+	RepoSpec   RepoSpec
+	ThreadType string
+	ThreadID   uint64
+	Title      string
+	Icon       OcticonID // TODO: Some notifications can exist for a long time. OcticonID may change when frontend updates to newer versions of octicons. Think of a better long term solution?
+	Color      RGB
+	Actor      users.User
+	UpdatedAt  time.Time
+	Read       bool
+	HTMLURL    string // Address of notification target.
 
 	Participating bool // Whether user is participating in the thread, or just watching.
 }

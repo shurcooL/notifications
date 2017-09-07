@@ -86,15 +86,15 @@ func (c rgb) RGB() notifications.RGB {
 
 // notification is an on-disk representation of notifications.Notification.
 type notification struct {
-	AppID     string // TODO: Maybe deduce appID and threadID from fi.Name() rather than adding that to encoded JSON...
-	RepoSpec  repoSpec
-	ThreadID  uint64 // TODO: Maybe deduce appID and threadID from fi.Name() rather than adding that to encoded JSON...
-	Title     string
-	Icon      octiconID
-	Color     rgb
-	Actor     userSpec
-	UpdatedAt time.Time
-	HTMLURL   string
+	RepoSpec   repoSpec
+	ThreadType string `json:"AppID"` // TODO: Maybe deduce threadType and threadID from fi.Name() rather than adding that to encoded JSON...
+	ThreadID   uint64 // TODO: Maybe deduce threadType and threadID from fi.Name() rather than adding that to encoded JSON...
+	Title      string
+	Icon       octiconID
+	Color      rgb
+	Actor      userSpec
+	UpdatedAt  time.Time
+	HTMLURL    string
 
 	Participating bool
 }
@@ -104,23 +104,20 @@ type notification struct {
 // 	root
 // 	├── notifications - unread notifications only
 // 	│   └── userSpec
-// 	│       └── domain.com-path-appID-threadID - encoded notification
+// 	│       └── domain.com-path-threadType-threadID - encoded notification
 // 	├── read - read notifications only
 // 	│   └── userSpec
-// 	│       └── domain.com-path-appID-threadID - encoded notification
+// 	│       └── domain.com-path-threadType-threadID - encoded notification
 // 	└── subscribers
 // 	    └── domain.com
 // 	        └── path
-// 	            ├── appID-threadID
+// 	            ├── threadType-threadID
 // 	            │   └── userSpec - blank file
 // 	            └── userSpec - blank file
 //
-// AppID is primarily needed to separate namespaces of {Repo, ThreadID}.
-// Without AppID, a notification about issue 1 in repo "a" would clash
+// ThreadType is primarily needed to separate namespaces of {Repo, ThreadID}.
+// Without ThreadType, a notification about issue 1 in repo "a" would clash
 // with a notification of another type also with threadID 1 in repo "a".
-//
-// TODO: Consider renaming it to "ThreadType" and make it 2nd parameter,
-//       so that it's more clear. (RepoURI, ThreadType, ThreadID).
 
 func notificationsDir(user users.UserSpec) string {
 	return path.Join("notifications", marshalUserSpec(user))
@@ -138,22 +135,22 @@ func readPath(user users.UserSpec, key string) string {
 	return path.Join(readDir(user), key)
 }
 
-func notificationKey(repo notifications.RepoSpec, appID string, threadID uint64) string {
+func notificationKey(repo notifications.RepoSpec, threadType string, threadID uint64) string {
 	// TODO: Think about repo.URI replacement of "/" -> "-", is it optimal?
-	return fmt.Sprintf("%s-%s-%d", strings.Replace(repo.URI, "/", "-", -1), appID, threadID)
+	return fmt.Sprintf("%s-%s-%d", strings.Replace(repo.URI, "/", "-", -1), threadType, threadID)
 }
 
-func subscribersDir(repo notifications.RepoSpec, appID string, threadID uint64) string {
+func subscribersDir(repo notifications.RepoSpec, threadType string, threadID uint64) string {
 	switch {
 	default:
-		return path.Join("subscribers", repo.URI, fmt.Sprintf("%s-%d", appID, threadID))
-	case appID == "" && threadID == 0:
+		return path.Join("subscribers", repo.URI, fmt.Sprintf("%s-%d", threadType, threadID))
+	case threadType == "" && threadID == 0:
 		return path.Join("subscribers", repo.URI)
 	}
 }
 
-func subscriberPath(repo notifications.RepoSpec, appID string, threadID uint64, subscriber users.UserSpec) string {
-	return path.Join(subscribersDir(repo, appID, threadID), marshalUserSpec(subscriber))
+func subscriberPath(repo notifications.RepoSpec, threadType string, threadID uint64, subscriber users.UserSpec) string {
+	return path.Join(subscribersDir(repo, threadType, threadID), marshalUserSpec(subscriber))
 }
 
 // TODO: Sort out userSpec.

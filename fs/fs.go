@@ -57,18 +57,17 @@ func (s service) List(ctx context.Context, opt notifications.ListOptions) (notif
 			continue
 		}
 
-		// TODO: Maybe deduce appID and threadID from fi.Name() rather than adding that to encoded JSON...
+		// TODO: Maybe deduce threadType and threadID from fi.Name() rather than adding that to encoded JSON...
 		ns = append(ns, notifications.Notification{
-			AppID:     n.AppID,
-			RepoSpec:  n.RepoSpec.RepoSpec(),
-			ThreadID:  n.ThreadID,
-			RepoURL:   "https://" + n.RepoSpec.URI,
-			Title:     n.Title,
-			Icon:      n.Icon.OcticonID(),
-			Color:     n.Color.RGB(),
-			Actor:     s.user(ctx, n.Actor.UserSpec()),
-			UpdatedAt: n.UpdatedAt,
-			HTMLURL:   n.HTMLURL,
+			RepoSpec:   n.RepoSpec.RepoSpec(),
+			ThreadType: n.ThreadType,
+			ThreadID:   n.ThreadID,
+			Title:      n.Title,
+			Icon:       n.Icon.OcticonID(),
+			Color:      n.Color.RGB(),
+			Actor:      s.user(ctx, n.Actor.UserSpec()),
+			UpdatedAt:  n.UpdatedAt,
+			HTMLURL:    n.HTMLURL,
 		})
 	}
 
@@ -99,19 +98,18 @@ func (s service) List(ctx context.Context, opt notifications.ListOptions) (notif
 				continue
 			}
 
-			// TODO: Maybe deduce appID and threadID from fi.Name() rather than adding that to encoded JSON...
+			// TODO: Maybe deduce threadType and threadID from fi.Name() rather than adding that to encoded JSON...
 			ns = append(ns, notifications.Notification{
-				AppID:     n.AppID,
-				RepoSpec:  n.RepoSpec.RepoSpec(),
-				ThreadID:  n.ThreadID,
-				RepoURL:   "https://" + n.RepoSpec.URI,
-				Title:     n.Title,
-				Icon:      n.Icon.OcticonID(),
-				Color:     n.Color.RGB(),
-				Actor:     s.user(ctx, n.Actor.UserSpec()),
-				UpdatedAt: n.UpdatedAt,
-				Read:      true,
-				HTMLURL:   n.HTMLURL,
+				RepoSpec:   n.RepoSpec.RepoSpec(),
+				ThreadType: n.ThreadType,
+				ThreadID:   n.ThreadID,
+				Title:      n.Title,
+				Icon:       n.Icon.OcticonID(),
+				Color:      n.Color.RGB(),
+				Actor:      s.user(ctx, n.Actor.UserSpec()),
+				UpdatedAt:  n.UpdatedAt,
+				Read:       true,
+				HTMLURL:    n.HTMLURL,
 			})
 		}
 
@@ -150,7 +148,7 @@ func (s service) Count(ctx context.Context, opt interface{}) (uint64, error) {
 	return uint64(len(notifications)), nil
 }
 
-func (s service) Notify(ctx context.Context, appID string, repo notifications.RepoSpec, threadID uint64, nr notifications.NotificationRequest) error {
+func (s service) Notify(ctx context.Context, repo notifications.RepoSpec, threadType string, threadID uint64, nr notifications.NotificationRequest) error {
 	currentUser, err := s.users.GetAuthenticatedSpec(ctx)
 	if err != nil {
 		return err
@@ -184,7 +182,7 @@ func (s service) Notify(ctx context.Context, appID string, repo notifications.Re
 
 	// Thread subscribers. Iterate over them after repo watchers,
 	// so that their participating status takes higher precedence.
-	fis, err = vfsutil.ReadDir(ctx, s.fs, subscribersDir(repo, appID, threadID))
+	fis, err = vfsutil.ReadDir(ctx, s.fs, subscribersDir(repo, threadType, threadID))
 	if os.IsNotExist(err) {
 		fis = nil
 	} else if err != nil {
@@ -208,7 +206,7 @@ func (s service) Notify(ctx context.Context, appID string, repo notifications.Re
 		}
 
 		// Delete read notification with same key, if any.
-		err = s.fs.RemoveAll(ctx, readPath(subscriber, notificationKey(repo, appID, threadID)))
+		err = s.fs.RemoveAll(ctx, readPath(subscriber, notificationKey(repo, threadType, threadID)))
 		if err != nil && !os.IsNotExist(err) {
 			return err
 		}
@@ -219,32 +217,32 @@ func (s service) Notify(ctx context.Context, appID string, repo notifications.Re
 			return err
 		}
 
-		// TODO: Maybe deduce appID and threadID from fi.Name() rather than adding that to encoded JSON...
+		// TODO: Maybe deduce threadType and threadID from fi.Name() rather than adding that to encoded JSON...
 		n := notification{
-			AppID:     appID,
-			RepoSpec:  fromRepoSpec(repo),
-			ThreadID:  threadID,
-			Title:     nr.Title,
-			HTMLURL:   nr.HTMLURL,
-			UpdatedAt: nr.UpdatedAt,
-			Icon:      fromOcticonID(nr.Icon),
-			Color:     fromRGB(nr.Color),
-			Actor:     fromUserSpec(nr.Actor), // TODO: Why not use current user?
+			RepoSpec:   fromRepoSpec(repo),
+			ThreadType: threadType,
+			ThreadID:   threadID,
+			Title:      nr.Title,
+			HTMLURL:    nr.HTMLURL,
+			UpdatedAt:  nr.UpdatedAt,
+			Icon:       fromOcticonID(nr.Icon),
+			Color:      fromRGB(nr.Color),
+			Actor:      fromUserSpec(nr.Actor), // TODO: Why not use current user?
 
 			Participating: subscription.Participating,
 		}
-		err = jsonEncodeFile(ctx, s.fs, notificationPath(subscriber, notificationKey(repo, appID, threadID)), n)
+		err = jsonEncodeFile(ctx, s.fs, notificationPath(subscriber, notificationKey(repo, threadType, threadID)), n)
 		// TODO: Maybe in future read previous value, and use it to preserve some fields, like earliest HTML URL.
 		//       Maybe that shouldn't happen here though.
 		if err != nil {
-			return fmt.Errorf("error writing %s: %v", notificationPath(subscriber, notificationKey(repo, appID, threadID)), err)
+			return fmt.Errorf("error writing %s: %v", notificationPath(subscriber, notificationKey(repo, threadType, threadID)), err)
 		}
 	}
 
 	return nil
 }
 
-func (s service) Subscribe(ctx context.Context, appID string, repo notifications.RepoSpec, threadID uint64, subscribers []users.UserSpec) error {
+func (s service) Subscribe(ctx context.Context, repo notifications.RepoSpec, threadType string, threadID uint64, subscribers []users.UserSpec) error {
 	currentUser, err := s.users.GetAuthenticatedSpec(ctx)
 	if err != nil {
 		return err
@@ -254,7 +252,7 @@ func (s service) Subscribe(ctx context.Context, appID string, repo notifications
 	}
 
 	for _, subscriber := range subscribers {
-		err := createEmptyFile(ctx, s.fs, subscriberPath(repo, appID, threadID, subscriber))
+		err := createEmptyFile(ctx, s.fs, subscriberPath(repo, threadType, threadID, subscriber))
 		if err != nil {
 			return err
 		}
@@ -263,7 +261,7 @@ func (s service) Subscribe(ctx context.Context, appID string, repo notifications
 	return nil
 }
 
-func (s service) MarkRead(ctx context.Context, appID string, repo notifications.RepoSpec, threadID uint64) error {
+func (s service) MarkRead(ctx context.Context, repo notifications.RepoSpec, threadType string, threadID uint64) error {
 	currentUser, err := s.users.GetAuthenticatedSpec(ctx)
 	if err != nil {
 		return err
@@ -273,7 +271,7 @@ func (s service) MarkRead(ctx context.Context, appID string, repo notifications.
 	}
 
 	// Return early if the notification doesn't exist, before creating readDir for currentUser.
-	key := notificationKey(repo, appID, threadID)
+	key := notificationKey(repo, threadType, threadID)
 	_, err = vfsutil.Stat(ctx, s.fs, notificationPath(currentUser, key))
 	if os.IsNotExist(err) {
 		return nil
@@ -344,7 +342,7 @@ func (s service) MarkAllRead(ctx context.Context, repo notifications.RepoSpec) e
 			madeReadDir = true
 		}
 		// Move notification to read directory.
-		key := notificationKey(repo, n.AppID, n.ThreadID)
+		key := notificationKey(repo, n.ThreadType, n.ThreadID)
 		err = s.fs.Rename(ctx, notificationPath(currentUser, key), readPath(currentUser, key))
 		if err != nil {
 			return err

@@ -35,17 +35,17 @@ func Test(t *testing.T) {
 	}
 
 	// Subscribe target user to all issues.
-	err = s.Subscribe(context.Background(), "issues", notifications.RepoSpec{URI: "repo"}, 1,
+	err = s.Subscribe(context.Background(), notifications.RepoSpec{URI: "repo"}, "issues", 1,
 		[]users.UserSpec{{ID: 1, Domain: "example.org"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = s.Subscribe(context.Background(), "issues", notifications.RepoSpec{URI: "repo"}, 2,
+	err = s.Subscribe(context.Background(), notifications.RepoSpec{URI: "repo"}, "issues", 2,
 		[]users.UserSpec{{ID: 1, Domain: "example.org"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = s.Subscribe(context.Background(), "issues", notifications.RepoSpec{URI: "repo"}, 3,
+	err = s.Subscribe(context.Background(), notifications.RepoSpec{URI: "repo"}, "issues", 3,
 		[]users.UserSpec{{ID: 1, Domain: "example.org"}})
 	if err != nil {
 		t.Fatal(err)
@@ -53,7 +53,7 @@ func Test(t *testing.T) {
 
 	// Make a notification as another user.
 	usersService.Current.ID = 2
-	err = s.Notify(context.Background(), "issues", notifications.RepoSpec{URI: "repo"}, 1,
+	err = s.Notify(context.Background(), notifications.RepoSpec{URI: "repo"}, "issues", 1,
 		notifications.NotificationRequest{
 			Title:     "Issue 1",
 			Actor:     users.UserSpec{ID: 1, Domain: "example.org"},
@@ -74,7 +74,7 @@ func Test(t *testing.T) {
 	}
 
 	// Mark it read.
-	err = s.MarkRead(context.Background(), "issues", notifications.RepoSpec{URI: "repo"}, 1)
+	err = s.MarkRead(context.Background(), notifications.RepoSpec{URI: "repo"}, "issues", 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,7 +97,7 @@ func Test(t *testing.T) {
 
 	// Make 2 new notifications as another user.
 	usersService.Current.ID = 2
-	err = s.Notify(context.Background(), "issues", notifications.RepoSpec{URI: "repo"}, 2,
+	err = s.Notify(context.Background(), notifications.RepoSpec{URI: "repo"}, "issues", 2,
 		notifications.NotificationRequest{
 			Title:     "Issue 2",
 			Actor:     users.UserSpec{ID: 1, Domain: "example.org"},
@@ -106,7 +106,7 @@ func Test(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = s.Notify(context.Background(), "issues", notifications.RepoSpec{URI: "repo"}, 3,
+	err = s.Notify(context.Background(), notifications.RepoSpec{URI: "repo"}, "issues", 3,
 		notifications.NotificationRequest{
 			Title:     "Issue 3",
 			Actor:     users.UserSpec{ID: 1, Domain: "example.org"},
@@ -157,7 +157,7 @@ func Test(t *testing.T) {
 
 	// Repeat a notification as another user.
 	usersService.Current.ID = 2
-	err = s.Notify(context.Background(), "issues", notifications.RepoSpec{URI: "repo"}, 1,
+	err = s.Notify(context.Background(), notifications.RepoSpec{URI: "repo"}, "issues", 1,
 		notifications.NotificationRequest{
 			Title:     "Issue 1",
 			Actor:     users.UserSpec{ID: 1, Domain: "example.org"},

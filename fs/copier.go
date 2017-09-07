@@ -28,21 +28,21 @@ func (s service) CopyFrom(ctx context.Context, src notifications.Service, dst us
 	for _, n := range ns {
 		// Copy notification.
 		notification := notification{
-			AppID:     n.AppID,
-			RepoSpec:  fromRepoSpec(n.RepoSpec),
-			ThreadID:  n.ThreadID,
-			Title:     n.Title,
-			HTMLURL:   n.HTMLURL,
-			UpdatedAt: n.UpdatedAt,
-			Icon:      fromOcticonID(n.Icon),
-			Color:     fromRGB(n.Color),
-			Actor:     fromUserSpec(n.Actor.UserSpec),
+			RepoSpec:   fromRepoSpec(n.RepoSpec),
+			ThreadType: n.ThreadType,
+			ThreadID:   n.ThreadID,
+			Title:      n.Title,
+			HTMLURL:    n.HTMLURL,
+			UpdatedAt:  n.UpdatedAt,
+			Icon:       fromOcticonID(n.Icon),
+			Color:      fromRGB(n.Color),
+			Actor:      fromUserSpec(n.Actor.UserSpec),
 		}
 
 		// Put in storage.
-		err = jsonEncodeFile(ctx, s.fs, notificationPath(dst, notificationKey(n.RepoSpec, n.AppID, n.ThreadID)), notification)
+		err = jsonEncodeFile(ctx, s.fs, notificationPath(dst, notificationKey(n.RepoSpec, n.ThreadType, n.ThreadID)), notification)
 		if err != nil {
-			return fmt.Errorf("error writing %s: %v", notificationPath(dst, notificationKey(n.RepoSpec, n.AppID, n.ThreadID)), err)
+			return fmt.Errorf("error writing %s: %v", notificationPath(dst, notificationKey(n.RepoSpec, n.ThreadType, n.ThreadID)), err)
 		}
 	}
 
