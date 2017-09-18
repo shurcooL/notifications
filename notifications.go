@@ -28,6 +28,13 @@ type Service interface {
 // ExternalService for notifications.
 type ExternalService interface {
 	// Subscribe subscribes subscribers to the specified thread.
+	// If threadType and threadID are 0, subscribers are subscribed
+	// to watch the entire repo.
+	//
+	// THINK: Why is MarkRead and MarkAllRead 2 separate methods instead of 1,
+	//        but this is combined into one method? Maybe there should be:
+	//        SubscribeAll(ctx context.Context, repo RepoSpec, subscribers []users.UserSpec) error
+	//        Or maybe MarkAllRead should be merged into MarkRead?
 	Subscribe(ctx context.Context, repo RepoSpec, threadType string, threadID uint64, subscribers []users.UserSpec) error
 
 	// MarkRead marks the specified thread as read.
