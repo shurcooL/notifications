@@ -86,6 +86,7 @@ func (s service) List(ctx context.Context, opt notifications.ListOptions) (notif
 			Read:       !*n.Unread,
 
 			Participating: *n.Reason != "subscribed", // According to https://developer.github.com/v3/activity/notifications/#notification-reasons, "subscribed" reason means "you're watching the repository", and all other reasons imply participation.
+			Mentioned:     *n.Reason == "mention",
 		}
 
 		// TODO: We're inside range ghNotifications loop here, and doing a single

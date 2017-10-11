@@ -74,6 +74,7 @@ type Notification struct {
 	HTMLURL    string // Address of notification target.
 
 	Participating bool // Whether user is participating in the thread, or just watching.
+	Mentioned     bool // Whether user was specifically @mentioned in the content.
 }
 
 // NotificationRequest represents a request to create a notification.
