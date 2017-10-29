@@ -113,7 +113,7 @@ func (s service) List(ctx context.Context, opt notifications.ListOptions) (notif
 						Comments struct {
 							Nodes []struct {
 								Author     githubqlActor
-								DatabaseID githubql.Int
+								DatabaseID uint64
 							}
 						} `graphql:"comments(last:1)"`
 					} `graphql:"issue(number:$issueNumber)"`
@@ -161,7 +161,7 @@ func (s service) List(ctx context.Context, opt notifications.ListOptions) (notif
 						Comments struct {
 							Nodes []struct {
 								Author     githubqlActor
-								DatabaseID githubql.Int
+								DatabaseID uint64
 							}
 						} `graphql:"comments(last:1)"`
 					} `graphql:"pullRequest(number:$prNumber)"`
@@ -395,7 +395,7 @@ func (s service) getNotificationActor(ctx context.Context, subject github.Notifi
 	}
 }
 
-func getIssueURL(rs repoSpec, issueID uint64, commentID githubql.Int) string {
+func getIssueURL(rs repoSpec, issueID, commentID uint64) string {
 	var fragment string
 	if commentID != 0 {
 		fragment = fmt.Sprintf("#issuecomment-%d", commentID)
@@ -403,7 +403,7 @@ func getIssueURL(rs repoSpec, issueID uint64, commentID githubql.Int) string {
 	return fmt.Sprintf("https://github.com/%s/%s/issues/%d%s", rs.Owner, rs.Repo, issueID, fragment)
 }
 
-func getPullRequestURL(rs repoSpec, prID uint64, commentID githubql.Int) string {
+func getPullRequestURL(rs repoSpec, prID, commentID uint64) string {
 	var fragment string
 	if commentID != 0 {
 		fragment = fmt.Sprintf("#issuecomment-%d", commentID)
