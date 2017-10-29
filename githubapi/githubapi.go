@@ -27,16 +27,29 @@ import (
 // Otherwise read notifications remain forever (until a new notification comes in).
 //
 // This service uses Cache-Control: no-cache request header to disable caching.
-func NewService(clientV3 *github.Client, clientV4 *githubql.Client) notifications.Service {
+//
+// If router is nil, GitHubRouter is used, which links to https://github.com.
+func NewService(clientV3 *github.Client, clientV4 *githubql.Client, router Router) notifications.Service {
+	if router == nil {
+		router = GitHubRouter{}
+	}
 	return service{
 		clV3: clientV3,
 		clV4: clientV4,
+		r:    router,
 	}
+}
+
+// Router provides HTML URLs of GitHub notification subjects.
+type Router interface {
+	// IssueURL returns the HTML URL of the specified GitHub issue.
+	IssueURL(owner, repo string, issueID uint64, commentID uint64) string
 }
 
 type service struct {
 	clV3 *github.Client   // GitHub REST API v3 client.
 	clV4 *githubql.Client // GitHub GraphQL API v4 client.
+	r    Router
 }
 
 func (s service) List(ctx context.Context, opt notifications.ListOptions) (notifications.Notifications, error) {
@@ -139,10 +152,10 @@ func (s service) List(ctx context.Context, opt notifications.ListOptions) (notif
 			switch len(q.Repository.Issue.Comments.Nodes) {
 			case 0:
 				notification.Actor = ghActor(q.Repository.Issue.Author)
-				notification.HTMLURL = getIssueURL(rs, issueID, 0)
+				notification.HTMLURL = s.r.IssueURL(rs.Owner, rs.Repo, issueID, 0)
 			case 1:
 				notification.Actor = ghActor(q.Repository.Issue.Comments.Nodes[0].Author)
-				notification.HTMLURL = getIssueURL(rs, issueID, q.Repository.Issue.Comments.Nodes[0].DatabaseID)
+				notification.HTMLURL = s.r.IssueURL(rs.Owner, rs.Repo, issueID, q.Repository.Issue.Comments.Nodes[0].DatabaseID)
 			}
 		case "PullRequest":
 			// This makes a single GraphQL API call. It's relatively slow/expensive
@@ -395,12 +408,17 @@ func (s service) getNotificationActor(ctx context.Context, subject github.Notifi
 	}
 }
 
-func getIssueURL(rs repoSpec, issueID, commentID uint64) string {
+// GitHubRouter provides HTML URLs of GitHub notification subjects on https://github.com.
+type GitHubRouter struct{}
+
+// IssueURL returns the HTML URL of the specified GitHub issue
+// on the https://github.com issue tracker.
+func (GitHubRouter) IssueURL(owner, repo string, issueID, commentID uint64) string {
 	var fragment string
 	if commentID != 0 {
 		fragment = fmt.Sprintf("#issuecomment-%d", commentID)
 	}
-	return fmt.Sprintf("https://github.com/%s/%s/issues/%d%s", rs.Owner, rs.Repo, issueID, fragment)
+	return fmt.Sprintf("https://github.com/%s/%s/issues/%d%s", owner, repo, issueID, fragment)
 }
 
 func getPullRequestURL(rs repoSpec, prID, commentID uint64) string {
