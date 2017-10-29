@@ -249,7 +249,7 @@ func (s service) List(ctx context.Context, opt notifications.ListOptions) (notif
 			if err != nil {
 				return ns, err
 			}
-			notification.HTMLURL = "https://github.com/" + *n.Repository.FullName + "/invitations"
+			notification.HTMLURL = getRepositoryInvitationURL(*n.Repository.FullName)
 		default:
 			log.Printf("unsupported *n.Subject.Type: %q\n", *n.Subject.Type)
 		}
@@ -432,6 +432,10 @@ func (s service) getReleaseURL(ctx context.Context, releaseAPIURL string) (strin
 		return "", err
 	}
 	return *rr.HTMLURL, nil
+}
+
+func getRepositoryInvitationURL(fullName string) string {
+	return "https://github.com/" + fullName + "/invitations"
 }
 
 func parseIssueSpec(issueAPIURL string) (_ repoSpec, issueID uint64, _ error) {
