@@ -525,6 +525,18 @@ type githubqlActor struct {
 }
 
 func ghActor(actor githubqlActor) users.User {
+	if actor.User.DatabaseID == 0 {
+		// Deleted user, replace with https://github.com/ghost.
+		return users.User{
+			UserSpec: users.UserSpec{
+				ID:     10137,
+				Domain: "github.com",
+			},
+			Login:     "ghost",
+			AvatarURL: "https://avatars3.githubusercontent.com/u/10137?v=4",
+			HTMLURL:   "https://github.com/ghost",
+		}
+	}
 	return users.User{
 		UserSpec: users.UserSpec{
 			ID:     actor.User.DatabaseID,
