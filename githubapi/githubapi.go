@@ -122,10 +122,10 @@ func (s service) List(ctx context.Context, opt notifications.ListOptions) (notif
 				Repository struct {
 					Issue struct {
 						State    githubql.IssueState
-						Author   githubqlActor
+						Author   *githubqlActor
 						Comments struct {
 							Nodes []struct {
-								Author     githubqlActor
+								Author     *githubqlActor
 								DatabaseID uint64
 							}
 						} `graphql:"comments(last:1)"`
@@ -170,10 +170,10 @@ func (s service) List(ctx context.Context, opt notifications.ListOptions) (notif
 				Repository struct {
 					PullRequest struct {
 						State    githubql.PullRequestState
-						Author   githubqlActor
+						Author   *githubqlActor
 						Comments struct {
 							Nodes []struct {
-								Author     githubqlActor
+								Author     *githubqlActor
 								DatabaseID uint64
 							}
 						} `graphql:"comments(last:1)"`
@@ -524,8 +524,8 @@ type githubqlActor struct {
 	URL       string
 }
 
-func ghActor(actor githubqlActor) users.User {
-	if actor.User.DatabaseID == 0 {
+func ghActor(actor *githubqlActor) users.User {
+	if actor == nil {
 		// Deleted user, replace with https://github.com/ghost.
 		return users.User{
 			UserSpec: users.UserSpec{
