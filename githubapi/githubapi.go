@@ -43,7 +43,10 @@ func NewService(clientV3 *github.Client, clientV4 *githubql.Client, router Route
 // Router provides HTML URLs of GitHub notification subjects.
 type Router interface {
 	// IssueURL returns the HTML URL of the specified GitHub issue.
-	IssueURL(owner, repo string, issueID uint64, commentID uint64) string
+	IssueURL(owner, repo string, issueID, commentID uint64) string
+
+	// PullRequestURL returns the HTML URL of the specified GitHub pull request.
+	PullRequestURL(owner, repo string, prID, commentID uint64) string
 }
 
 type service struct {
@@ -201,10 +204,10 @@ func (s service) List(ctx context.Context, opt notifications.ListOptions) (notif
 			switch len(q.Repository.PullRequest.Comments.Nodes) {
 			case 0:
 				notification.Actor = ghActor(q.Repository.PullRequest.Author)
-				notification.HTMLURL = getPullRequestURL(rs, prID, 0)
+				notification.HTMLURL = s.r.PullRequestURL(rs.Owner, rs.Repo, prID, 0)
 			case 1:
 				notification.Actor = ghActor(q.Repository.PullRequest.Comments.Nodes[0].Author)
-				notification.HTMLURL = getPullRequestURL(rs, prID, q.Repository.PullRequest.Comments.Nodes[0].DatabaseID)
+				notification.HTMLURL = s.r.PullRequestURL(rs.Owner, rs.Repo, prID, q.Repository.PullRequest.Comments.Nodes[0].DatabaseID)
 			}
 		case "Commit":
 			// getNotificationActor makes a single API call. It's relatively slow/expensive
@@ -421,12 +424,12 @@ func (GitHubRouter) IssueURL(owner, repo string, issueID, commentID uint64) stri
 	return fmt.Sprintf("https://github.com/%s/%s/issues/%d%s", owner, repo, issueID, fragment)
 }
 
-func getPullRequestURL(rs repoSpec, prID, commentID uint64) string {
+func (GitHubRouter) PullRequestURL(owner, repo string, prID, commentID uint64) string {
 	var fragment string
 	if commentID != 0 {
 		fragment = fmt.Sprintf("#issuecomment-%d", commentID)
 	}
-	return fmt.Sprintf("https://github.com/%s/%s/pull/%d%s", rs.Owner, rs.Repo, prID, fragment)
+	return fmt.Sprintf("https://github.com/%s/%s/pull/%d%s", owner, repo, prID, fragment)
 }
 
 func getCommitURL(subject github.NotificationSubject) (string, error) {
