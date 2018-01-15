@@ -28,7 +28,7 @@ type Service interface {
 // ExternalService for notifications.
 type ExternalService interface {
 	// Subscribe subscribes subscribers to the specified thread.
-	// If threadType and threadID are 0, subscribers are subscribed
+	// If threadType and threadID are zero, subscribers are subscribed
 	// to watch the entire repo.
 	//
 	// THINK: Why is MarkRead and MarkAllRead 2 separate methods instead of 1,
