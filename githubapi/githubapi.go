@@ -466,10 +466,10 @@ func (s service) getNotificationActor(ctx context.Context, subject github.Notifi
 		return users.User{}, err
 	}
 	if n.User != nil {
-		return ghUser(n.User), nil
+		return ghV3User(*n.User), nil
 	} else if n.Author != nil {
 		// Author is used as fallback, if User isn't present. It can happen on releases, etc.
-		return ghUser(n.Author), nil
+		return ghV3User(*n.Author), nil
 	} else {
 		return users.User{}, fmt.Errorf("both User and Author are nil for %q: %v", apiURL, n)
 	}
@@ -568,10 +568,7 @@ type repoSpec struct {
 }
 
 func ghRepoSpec(repo notifications.RepoSpec) (repoSpec, error) {
-	// TODO, THINK: Include "github.com/" prefix or not?
-	//              So far I'm leaning towards "yes", because it's more definitive and matches
-	//              local uris that also include host. This way, the host can be checked as part of
-	//              request, rather than kept implicit.
+	// The "github.com/" prefix is expected to be included.
 	ghOwnerRepo := strings.Split(repo.URI, "/")
 	if len(ghOwnerRepo) != 3 || ghOwnerRepo[0] != "github.com" || ghOwnerRepo[1] == "" || ghOwnerRepo[2] == "" {
 		return repoSpec{}, fmt.Errorf(`RepoSpec is not of form "github.com/owner/repo": %q`, repo.URI)
@@ -586,6 +583,9 @@ type githubqlActor struct {
 	User struct {
 		DatabaseID uint64
 	} `graphql:"...on User"`
+	Bot struct {
+		DatabaseID uint64
+	} `graphql:"...on Bot"`
 	Login     string
 	AvatarURL string `graphql:"avatarUrl(size:36)"`
 	URL       string
@@ -593,20 +593,11 @@ type githubqlActor struct {
 
 func ghActor(actor *githubqlActor) users.User {
 	if actor == nil {
-		// Deleted user, replace with https://github.com/ghost.
-		return users.User{
-			UserSpec: users.UserSpec{
-				ID:     10137,
-				Domain: "github.com",
-			},
-			Login:     "ghost",
-			AvatarURL: "https://avatars3.githubusercontent.com/u/10137?v=4",
-			HTMLURL:   "https://github.com/ghost",
-		}
+		return ghost // Deleted user, replace with https://github.com/ghost.
 	}
 	return users.User{
 		UserSpec: users.UserSpec{
-			ID:     actor.User.DatabaseID,
+			ID:     actor.User.DatabaseID | actor.Bot.DatabaseID,
 			Domain: "github.com",
 		},
 		Login:     actor.Login,
@@ -615,7 +606,10 @@ func ghActor(actor *githubqlActor) users.User {
 	}
 }
 
-func ghUser(user *github.User) users.User {
+func ghV3User(user github.User) users.User {
+	if *user.ID == 0 {
+		return ghost // Deleted user, replace with https://github.com/ghost.
+	}
 	return users.User{
 		UserSpec: users.UserSpec{
 			ID:     uint64(*user.ID),
@@ -634,9 +628,20 @@ func avatarURLSize(avatarURL string, size int) string {
 		return avatarURL
 	}
 	q := u.Query()
-	q.Set("s", fmt.Sprint(size))
+	q.Set("s", strconv.Itoa(size))
 	u.RawQuery = q.Encode()
 	return u.String()
+}
+
+// ghost is https://github.com/ghost, a replacement for deleted users.
+var ghost = users.User{
+	UserSpec: users.UserSpec{
+		ID:     10137,
+		Domain: "github.com",
+	},
+	Login:     "ghost",
+	AvatarURL: "https://avatars3.githubusercontent.com/u/10137?v=4&s=36",
+	HTMLURL:   "https://github.com/ghost",
 }
 
 // TODO: Start using cache whenever possible, remove these.
