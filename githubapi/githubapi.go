@@ -11,7 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/go-github/github"
+	"dmitri.shuralyov.com/route/github"
+	githubV3 "github.com/google/go-github/github"
 	"github.com/google/go-querystring/query"
 	"github.com/gregjones/httpcache"
 	"github.com/shurcooL/githubql"
@@ -31,41 +32,32 @@ import (
 // Responses from cache must be marked with "X-From-Cache" header (i.e., the field
 // MarkCachedResponses in httpcache.Transport must be set to true).
 //
-// If router is nil, GitHubRouter is used, which links to https://github.com.
-func NewService(clientV3 *github.Client, clientV4 *githubql.Client, router Router) notifications.Service {
+// If router is nil, github.DotCom router is used, which links to subjects on github.com.
+func NewService(clientV3 *githubV3.Client, clientV4 *githubql.Client, router github.Router) notifications.Service {
 	if router == nil {
-		router = GitHubRouter{}
+		router = github.DotCom{}
 	}
 	return service{
 		clV3: clientV3,
 		clV4: clientV4,
-		r:    router,
+		rtr:  router,
 	}
 }
 
-// Router provides HTML URLs of GitHub notification subjects.
-type Router interface {
-	// IssueURL returns the HTML URL of the specified GitHub issue.
-	IssueURL(owner, repo string, issueID, commentID uint64) string
-
-	// PullRequestURL returns the HTML URL of the specified GitHub pull request.
-	PullRequestURL(owner, repo string, prID, commentID uint64) string
-}
-
 type service struct {
-	clV3 *github.Client   // GitHub REST API v3 client.
+	clV3 *githubV3.Client // GitHub REST API v3 client.
 	clV4 *githubql.Client // GitHub GraphQL API v4 client.
-	r    Router
+	rtr  github.Router
 }
 
 func (s service) List(ctx context.Context, opt notifications.ListOptions) (notifications.Notifications, error) {
 	var ns []notifications.Notification
 
-	ghOpt := &github.NotificationListOptions{
+	ghOpt := &githubV3.NotificationListOptions{
 		All:         opt.All,
-		ListOptions: github.ListOptions{PerPage: 100},
+		ListOptions: githubV3.ListOptions{PerPage: 100},
 	}
-	var ghNotifications []*github.Notification
+	var ghNotifications []*githubV3.Notification
 	switch opt.Repo {
 	case nil:
 		for {
@@ -158,10 +150,10 @@ func (s service) List(ctx context.Context, opt notifications.ListOptions) (notif
 			switch len(q.Repository.Issue.Comments.Nodes) {
 			case 0:
 				notification.Actor = ghActor(q.Repository.Issue.Author)
-				notification.HTMLURL = s.r.IssueURL(rs.Owner, rs.Repo, issueID, 0)
+				notification.HTMLURL = s.rtr.IssueURL(ctx, rs.Owner, rs.Repo, issueID, 0)
 			case 1:
 				notification.Actor = ghActor(q.Repository.Issue.Comments.Nodes[0].Author)
-				notification.HTMLURL = s.r.IssueURL(rs.Owner, rs.Repo, issueID, q.Repository.Issue.Comments.Nodes[0].DatabaseID)
+				notification.HTMLURL = s.rtr.IssueURL(ctx, rs.Owner, rs.Repo, issueID, q.Repository.Issue.Comments.Nodes[0].DatabaseID)
 			}
 		case "PullRequest":
 			// This makes a single GraphQL API call. It's relatively slow/expensive
@@ -207,10 +199,10 @@ func (s service) List(ctx context.Context, opt notifications.ListOptions) (notif
 			switch len(q.Repository.PullRequest.Comments.Nodes) {
 			case 0:
 				notification.Actor = ghActor(q.Repository.PullRequest.Author)
-				notification.HTMLURL = s.r.PullRequestURL(rs.Owner, rs.Repo, prID, 0)
+				notification.HTMLURL = s.rtr.PullRequestURL(ctx, rs.Owner, rs.Repo, prID, 0)
 			case 1:
 				notification.Actor = ghActor(q.Repository.PullRequest.Comments.Nodes[0].Author)
-				notification.HTMLURL = s.r.PullRequestURL(rs.Owner, rs.Repo, prID, q.Repository.PullRequest.Comments.Nodes[0].DatabaseID)
+				notification.HTMLURL = s.rtr.PullRequestURL(ctx, rs.Owner, rs.Repo, prID, q.Repository.PullRequest.Comments.Nodes[0].DatabaseID)
 			}
 		case "Commit":
 			// getNotificationActor makes a single API call. It's relatively slow/expensive
@@ -280,7 +272,7 @@ func (s service) List(ctx context.Context, opt notifications.ListOptions) (notif
 }
 
 func (s service) Count(ctx context.Context, opt interface{}) (uint64, error) {
-	ghOpt := &github.NotificationListOptions{ListOptions: github.ListOptions{PerPage: 1}}
+	ghOpt := &githubV3.NotificationListOptions{ListOptions: githubV3.ListOptions{PerPage: 1}}
 	ghNotifications, resp, err := ghListNotifications(ctx, s.clV3, ghOpt, false)
 	if err != nil {
 		return 0, err
@@ -373,7 +365,7 @@ but did find within uncached
 // threadType must be one of "Issue" or "PullRequest".
 // It returns nil if no matching notification is found, and
 // any error encountered.
-func findNotification(ns []*github.Notification, threadType string, threadID uint64) (*github.Notification, error) {
+func findNotification(ns []*githubV3.Notification, threadType string, threadID uint64) (*githubV3.Notification, error) {
 	for _, n := range ns {
 		if *n.Subject.Type != threadType {
 			// Mismatched thread type.
@@ -407,7 +399,7 @@ func findNotification(ns []*github.Notification, threadType string, threadID uin
 }
 
 // notificationsString returns a string representation of notifications ns.
-func notificationsString(ns []*github.Notification) string {
+func notificationsString(ns []*githubV3.Notification) string {
 	var ss []string
 	for _, n := range ns {
 		ss = append(ss, "\t"+strings.TrimPrefix(*n.Subject.URL, "https://api.github.com/"))
@@ -441,7 +433,7 @@ func (s service) Subscribe(ctx context.Context, repo notifications.RepoSpec, thr
 // to fetch an object that contains a User or Author, who is taken to be
 // the actor that triggered the notification. It returns an error only if
 // something unexpected happened.
-func (s service) getNotificationActor(ctx context.Context, subject github.NotificationSubject) (users.User, error) {
+func (s service) getNotificationActor(ctx context.Context, subject githubV3.NotificationSubject) (users.User, error) {
 	var apiURL string
 	if subject.LatestCommentURL != nil {
 		apiURL = *subject.LatestCommentURL
@@ -458,8 +450,8 @@ func (s service) getNotificationActor(ctx context.Context, subject github.Notifi
 		return users.User{}, err
 	}
 	var n struct {
-		User   *github.User
-		Author *github.User
+		User   *githubV3.User
+		Author *githubV3.User
 	}
 	_, err = s.clV3.Do(ctx, req, &n)
 	if err != nil {
@@ -475,28 +467,7 @@ func (s service) getNotificationActor(ctx context.Context, subject github.Notifi
 	}
 }
 
-// GitHubRouter provides HTML URLs of GitHub notification subjects on https://github.com.
-type GitHubRouter struct{}
-
-// IssueURL returns the HTML URL of the specified GitHub issue
-// on the https://github.com issue tracker.
-func (GitHubRouter) IssueURL(owner, repo string, issueID, commentID uint64) string {
-	var fragment string
-	if commentID != 0 {
-		fragment = fmt.Sprintf("#issuecomment-%d", commentID)
-	}
-	return fmt.Sprintf("https://github.com/%s/%s/issues/%d%s", owner, repo, issueID, fragment)
-}
-
-func (GitHubRouter) PullRequestURL(owner, repo string, prID, commentID uint64) string {
-	var fragment string
-	if commentID != 0 {
-		fragment = fmt.Sprintf("#issuecomment-%d", commentID)
-	}
-	return fmt.Sprintf("https://github.com/%s/%s/pull/%d%s", owner, repo, prID, fragment)
-}
-
-func getCommitURL(subject github.NotificationSubject) (string, error) {
+func getCommitURL(subject githubV3.NotificationSubject) (string, error) {
 	rs, commit, err := parseSpec(*subject.URL, "commits")
 	if err != nil {
 		return "", err
@@ -511,7 +482,7 @@ func (s service) getReleaseURL(ctx context.Context, releaseAPIURL string) (strin
 	if err != nil {
 		return "", err
 	}
-	var rr github.RepositoryRelease
+	var rr githubV3.RepositoryRelease
 	_, err = s.clV3.Do(ctx, req, &rr)
 	if err != nil {
 		return "", err
@@ -606,7 +577,7 @@ func ghActor(actor *githubqlActor) users.User {
 	}
 }
 
-func ghV3User(user github.User) users.User {
+func ghV3User(user githubV3.User) users.User {
 	if *user.ID == 0 {
 		return ghost // Deleted user, replace with https://github.com/ghost.
 	}
@@ -646,9 +617,9 @@ var ghost = users.User{
 
 // TODO: Start using cache whenever possible, remove these.
 
-// ghListNotifications is like github.Client.Activity.ListNotifications,
+// ghListNotifications is like githubV3.Client.Activity.ListNotifications,
 // but gives caller control over whether cache can be used.
-func ghListNotifications(ctx context.Context, cl *github.Client, opt *github.NotificationListOptions, cache bool) ([]*github.Notification, *github.Response, error) {
+func ghListNotifications(ctx context.Context, cl *githubV3.Client, opt *githubV3.NotificationListOptions, cache bool) ([]*githubV3.Notification, *githubV3.Response, error) {
 	u := fmt.Sprintf("notifications")
 	u, err := ghAddOptions(u, opt)
 	if err != nil {
@@ -663,14 +634,14 @@ func ghListNotifications(ctx context.Context, cl *github.Client, opt *github.Not
 		req.Header.Set("Cache-Control", "no-cache")
 	}
 
-	var notifications []*github.Notification
+	var notifications []*githubV3.Notification
 	resp, err := cl.Do(ctx, req, &notifications)
 	return notifications, resp, err
 }
 
-// ghListRepositoryNotifications is like github.Client.Activity.ListRepositoryNotifications,
+// ghListRepositoryNotifications is like githubV3.Client.Activity.ListRepositoryNotifications,
 // but gives caller control over whether cache can be used.
-func ghListRepositoryNotifications(ctx context.Context, cl *github.Client, owner, repo string, opt *github.NotificationListOptions, cache bool) ([]*github.Notification, *github.Response, error) {
+func ghListRepositoryNotifications(ctx context.Context, cl *githubV3.Client, owner, repo string, opt *githubV3.NotificationListOptions, cache bool) ([]*githubV3.Notification, *githubV3.Response, error) {
 	u := fmt.Sprintf("repos/%v/%v/notifications", owner, repo)
 	u, err := ghAddOptions(u, opt)
 	if err != nil {
@@ -685,7 +656,7 @@ func ghListRepositoryNotifications(ctx context.Context, cl *github.Client, owner
 		req.Header.Set("Cache-Control", "no-cache")
 	}
 
-	var notifications []*github.Notification
+	var notifications []*githubV3.Notification
 	resp, err := cl.Do(ctx, req, &notifications)
 	return notifications, resp, err
 }
