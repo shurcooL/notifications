@@ -20,6 +20,7 @@ type Service interface {
 	Count(ctx context.Context, opt interface{}) (uint64, error)
 
 	// MarkAllRead marks all notifications in the specified repository as read.
+	// Returns a permission error if no authenticated user.
 	MarkAllRead(ctx context.Context, repo RepoSpec) error
 
 	ExternalService
@@ -30,6 +31,7 @@ type ExternalService interface {
 	// Subscribe subscribes subscribers to the specified thread.
 	// If threadType and threadID are zero, subscribers are subscribed
 	// to watch the entire repo.
+	// Returns a permission error if no authenticated user.
 	//
 	// THINK: Why is MarkRead and MarkAllRead 2 separate methods instead of 1,
 	//        but this is combined into one method? Maybe there should be:
@@ -38,9 +40,11 @@ type ExternalService interface {
 	Subscribe(ctx context.Context, repo RepoSpec, threadType string, threadID uint64, subscribers []users.UserSpec) error
 
 	// MarkRead marks the specified thread as read.
+	// Returns a permission error if no authenticated user.
 	MarkRead(ctx context.Context, repo RepoSpec, threadType string, threadID uint64) error
 
 	// Notify notifies subscribers of the specified thread of a notification.
+	// Returns a permission error if no authenticated user.
 	Notify(ctx context.Context, repo RepoSpec, threadType string, threadID uint64, nr NotificationRequest) error
 }
 
