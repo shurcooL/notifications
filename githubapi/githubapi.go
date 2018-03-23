@@ -150,10 +150,10 @@ func (s service) List(ctx context.Context, opt notifications.ListOptions) (notif
 			switch len(q.Repository.Issue.Comments.Nodes) {
 			case 0:
 				notification.Actor = ghActor(q.Repository.Issue.Author)
-				notification.HTMLURL = s.rtr.IssueURL(ctx, rs.Owner, rs.Repo, issueID, 0)
+				notification.HTMLURL = s.rtr.IssueURL(ctx, rs.Owner, rs.Repo, issueID)
 			case 1:
 				notification.Actor = ghActor(q.Repository.Issue.Comments.Nodes[0].Author)
-				notification.HTMLURL = s.rtr.IssueURL(ctx, rs.Owner, rs.Repo, issueID, q.Repository.Issue.Comments.Nodes[0].DatabaseID)
+				notification.HTMLURL = s.rtr.IssueCommentURL(ctx, rs.Owner, rs.Repo, issueID, q.Repository.Issue.Comments.Nodes[0].DatabaseID)
 			}
 		case "PullRequest":
 			// This makes a single GraphQL API call. It's relatively slow/expensive
@@ -173,8 +173,16 @@ func (s service) List(ctx context.Context, opt notifications.ListOptions) (notif
 							Nodes []struct {
 								Author     *githubqlActor
 								DatabaseID uint64
+								CreatedAt  time.Time
 							}
 						} `graphql:"comments(last:1)"`
+						Reviews struct {
+							Nodes []struct {
+								Author     *githubqlActor
+								DatabaseID uint64
+								CreatedAt  time.Time
+							}
+						} `graphql:"reviews(last:1)"`
 					} `graphql:"pullRequest(number:$prNumber)"`
 				} `graphql:"repository(owner:$repositoryOwner,name:$repositoryName)"`
 			}
@@ -196,13 +204,25 @@ func (s service) List(ctx context.Context, opt notifications.ListOptions) (notif
 			case githubql.PullRequestStateMerged:
 				notification.Color = notifications.RGB{R: 0x6e, G: 0x54, B: 0x94} // Purple.
 			}
-			switch len(q.Repository.PullRequest.Comments.Nodes) {
-			case 0:
+			switch c, r := q.Repository.PullRequest.Comments.Nodes, q.Repository.PullRequest.Reviews.Nodes; {
+			case len(c) == 0 && len(r) == 0:
 				notification.Actor = ghActor(q.Repository.PullRequest.Author)
-				notification.HTMLURL = s.rtr.PullRequestURL(ctx, rs.Owner, rs.Repo, prID, 0)
-			case 1:
-				notification.Actor = ghActor(q.Repository.PullRequest.Comments.Nodes[0].Author)
-				notification.HTMLURL = s.rtr.PullRequestURL(ctx, rs.Owner, rs.Repo, prID, q.Repository.PullRequest.Comments.Nodes[0].DatabaseID)
+				notification.HTMLURL = s.rtr.PullRequestURL(ctx, rs.Owner, rs.Repo, prID)
+			case len(c) == 1 && len(r) == 0:
+				notification.Actor = ghActor(c[0].Author)
+				notification.HTMLURL = s.rtr.PullRequestCommentURL(ctx, rs.Owner, rs.Repo, prID, c[0].DatabaseID)
+			case len(c) == 0 && len(r) == 1:
+				notification.Actor = ghActor(r[0].Author)
+				notification.HTMLURL = s.rtr.PullRequestReviewURL(ctx, rs.Owner, rs.Repo, prID, r[0].DatabaseID)
+			case len(c) == 1 && len(r) == 1:
+				// Use the later of the two.
+				if c[0].CreatedAt.After(r[0].CreatedAt) {
+					notification.Actor = ghActor(c[0].Author)
+					notification.HTMLURL = s.rtr.PullRequestCommentURL(ctx, rs.Owner, rs.Repo, prID, c[0].DatabaseID)
+				} else {
+					notification.Actor = ghActor(r[0].Author)
+					notification.HTMLURL = s.rtr.PullRequestReviewURL(ctx, rs.Owner, rs.Repo, prID, r[0].DatabaseID)
+				}
 			}
 		case "Commit":
 			// getNotificationActor makes a single API call. It's relatively slow/expensive
