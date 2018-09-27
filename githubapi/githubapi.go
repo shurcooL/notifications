@@ -331,53 +331,68 @@ func (s service) MarkRead(ctx context.Context, rs notifications.RepoSpec, thread
 	if err != nil {
 		return err
 	}
+
+	// First, iterate over all pages of notifications, looking for the specified notification.
 	// It's okay to use with-cache client here, because we don't mind seeing read notifications
 	// for the purposes of MarkRead. They'll be skipped if the notification ID doesn't match.
-	cached, resp, err := ghListRepositoryNotifications(ctx, s.clV3, repo.Owner, repo.Repo, nil, true)
-	if err != nil {
-		return fmt.Errorf("failed to ListRepositoryNotifications: %v", err)
+	var fromCache bool
+	ghOpt := &githubv3.NotificationListOptions{ListOptions: githubv3.ListOptions{PerPage: 100}}
+	for {
+		cached, resp, err := ghListRepositoryNotifications(ctx, s.clV3, repo.Owner, repo.Repo, ghOpt, true)
+		if err != nil {
+			return fmt.Errorf("failed to ListRepositoryNotifications: %v", err)
+		}
+		if _, ok := resp.Response.Header[httpcache.XFromCache]; ok {
+			fromCache = true
+		}
+		if notif, err := findNotification(cached, threadType, threadID); err != nil {
+			return err
+		} else if notif != nil {
+			// Found a matching notification, mark it read.
+			return s.markRead(ctx, notif)
+		}
+		if resp.NextPage == 0 {
+			break
+		}
+		ghOpt.Page = resp.NextPage
 	}
-	n, err := findNotification(cached, threadType, threadID)
-	if err != nil {
-		return err
-	}
+
 	// However, there are sometimes caching issues causing stale repository notifications
 	// to be retrieved from cache, and a legitimate existing notification is not marked read.
 	// So fall back to skipping cache, if we can't find a notification and the response
 	// we got was from cache (rather than origin server).
-	if _, fromCache := resp.Response.Header[httpcache.XFromCache]; n == nil && fromCache {
-		uncached, _, err := ghListRepositoryNotifications(ctx, s.clV3, repo.Owner, repo.Repo, nil, false)
-		if err != nil {
-			return fmt.Errorf("failed to ListRepositoryNotifications: %v", err)
+	if fromCache {
+		ghOpt.Page = 0
+		for {
+			uncached, resp, err := ghListRepositoryNotifications(ctx, s.clV3, repo.Owner, repo.Repo, ghOpt, false)
+			if err != nil {
+				return fmt.Errorf("failed to ListRepositoryNotifications: %v", err)
+			}
+			if notif, err := findNotification(uncached, threadType, threadID); err != nil {
+				return err
+			} else if notif != nil {
+				// Found a matching notification, mark it read.
+				log.Printf(`MarkRead: did not find notification %s/%s %s %d within cached notifications, but did find within uncached ones`, repo.Owner, repo.Repo, threadType, threadID)
+				return s.markRead(ctx, notif)
+			}
+			if resp.NextPage == 0 {
+				break
+			}
+			ghOpt.Page = resp.NextPage
 		}
-		n, err = findNotification(uncached, threadType, threadID)
-		if err != nil {
-			return err
-		}
+	}
 
-		if n != nil {
-			log.Printf(`MarkRead: did not find notification %s/%s %s %d within cached
-%d notifications:
-%s
-but did find within uncached
-%d notifications:
-%s
-`, repo.Owner, repo.Repo, threadType, threadID, len(cached), notificationsString(cached), len(uncached), notificationsString(uncached))
-		}
+	// Didn't find any matching notification to mark read.
+	// Nothing to do.
+	return nil
+}
+
+func (s service) markRead(ctx context.Context, n *githubv3.Notification) error {
+	_, err := s.clV3.Activity.MarkThreadRead(ctx, *n.ID)
+	if err != nil {
+		return fmt.Errorf("failed to MarkThreadRead: %v", err)
 	}
-	switch n {
-	default:
-		// Found a matching notification, mark it read.
-		_, err = s.clV3.Activity.MarkThreadRead(ctx, *n.ID)
-		if err != nil {
-			return fmt.Errorf("MarkRead: failed to MarkThreadRead: %v", err)
-		}
-		return nil
-	case nil:
-		// Didn't find any matching notification to mark read.
-		// Nothing to do.
-		return nil
-	}
+	return nil
 }
 
 // findNotification tries to find a notification that matches
@@ -416,15 +431,6 @@ func findNotification(ns []*githubv3.Notification, threadType string, threadID u
 		return n, nil
 	}
 	return nil, nil
-}
-
-// notificationsString returns a string representation of notifications ns.
-func notificationsString(ns []*githubv3.Notification) string {
-	var ss []string
-	for _, n := range ns {
-		ss = append(ss, "\t"+strings.TrimPrefix(*n.Subject.URL, "https://api.github.com/"))
-	}
-	return strings.Join(ss, "\n")
 }
 
 func (s service) MarkAllRead(ctx context.Context, rs notifications.RepoSpec) error {
