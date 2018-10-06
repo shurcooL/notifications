@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/shurcooL/notifications"
@@ -17,19 +18,20 @@ import (
 // NewService creates a virtual filesystem-backed notifications.Service,
 // using root for storage.
 func NewService(root webdav.FileSystem, users users.Service) notifications.Service {
-	return service{
+	return &service{
 		fs:    root,
 		users: users,
 	}
 }
 
 type service struct {
-	fs webdav.FileSystem
+	fsMu sync.RWMutex
+	fs   webdav.FileSystem
 
 	users users.Service
 }
 
-func (s service) List(ctx context.Context, opt notifications.ListOptions) (notifications.Notifications, error) {
+func (s *service) List(ctx context.Context, opt notifications.ListOptions) (notifications.Notifications, error) {
 	currentUser, err := s.users.GetAuthenticatedSpec(ctx)
 	if err != nil {
 		return nil, err
@@ -37,6 +39,9 @@ func (s service) List(ctx context.Context, opt notifications.ListOptions) (notif
 	if currentUser.ID == 0 {
 		return nil, os.ErrPermission
 	}
+
+	s.fsMu.RLock()
+	defer s.fsMu.RUnlock()
 
 	var ns notifications.Notifications
 
@@ -129,7 +134,7 @@ func (s service) List(ctx context.Context, opt notifications.ListOptions) (notif
 	return ns, nil
 }
 
-func (s service) Count(ctx context.Context, opt interface{}) (uint64, error) {
+func (s *service) Count(ctx context.Context, opt interface{}) (uint64, error) {
 	currentUser, err := s.users.GetAuthenticatedSpec(ctx)
 	if err != nil {
 		return 0, err
@@ -137,6 +142,9 @@ func (s service) Count(ctx context.Context, opt interface{}) (uint64, error) {
 	if currentUser.ID == 0 {
 		return 0, os.ErrPermission
 	}
+
+	s.fsMu.RLock()
+	defer s.fsMu.RUnlock()
 
 	// TODO: Consider reading/parsing entries, in case there's .DS_Store, etc., that should be skipped?
 	notifications, err := vfsutil.ReadDir(ctx, s.fs, notificationsDir(currentUser))
@@ -148,7 +156,7 @@ func (s service) Count(ctx context.Context, opt interface{}) (uint64, error) {
 	return uint64(len(notifications)), nil
 }
 
-func (s service) Notify(ctx context.Context, repo notifications.RepoSpec, threadType string, threadID uint64, nr notifications.NotificationRequest) error {
+func (s *service) Notify(ctx context.Context, repo notifications.RepoSpec, threadType string, threadID uint64, nr notifications.NotificationRequest) error {
 	currentUser, err := s.users.GetAuthenticatedSpec(ctx)
 	if err != nil {
 		return err
@@ -156,6 +164,9 @@ func (s service) Notify(ctx context.Context, repo notifications.RepoSpec, thread
 	if currentUser.ID == 0 {
 		return os.ErrPermission
 	}
+
+	s.fsMu.Lock()
+	defer s.fsMu.Unlock()
 
 	type subscription struct {
 		Participating bool
@@ -242,7 +253,7 @@ func (s service) Notify(ctx context.Context, repo notifications.RepoSpec, thread
 	return nil
 }
 
-func (s service) Subscribe(ctx context.Context, repo notifications.RepoSpec, threadType string, threadID uint64, subscribers []users.UserSpec) error {
+func (s *service) Subscribe(ctx context.Context, repo notifications.RepoSpec, threadType string, threadID uint64, subscribers []users.UserSpec) error {
 	currentUser, err := s.users.GetAuthenticatedSpec(ctx)
 	if err != nil {
 		return err
@@ -250,6 +261,9 @@ func (s service) Subscribe(ctx context.Context, repo notifications.RepoSpec, thr
 	if currentUser.ID == 0 {
 		return os.ErrPermission
 	}
+
+	s.fsMu.Lock()
+	defer s.fsMu.Unlock()
 
 	for _, subscriber := range subscribers {
 		err := createEmptyFile(ctx, s.fs, subscriberPath(repo, threadType, threadID, subscriber))
@@ -261,7 +275,7 @@ func (s service) Subscribe(ctx context.Context, repo notifications.RepoSpec, thr
 	return nil
 }
 
-func (s service) MarkRead(ctx context.Context, repo notifications.RepoSpec, threadType string, threadID uint64) error {
+func (s *service) MarkRead(ctx context.Context, repo notifications.RepoSpec, threadType string, threadID uint64) error {
 	currentUser, err := s.users.GetAuthenticatedSpec(ctx)
 	if err != nil {
 		return err
@@ -269,6 +283,9 @@ func (s service) MarkRead(ctx context.Context, repo notifications.RepoSpec, thre
 	if currentUser.ID == 0 {
 		return os.ErrPermission
 	}
+
+	s.fsMu.Lock()
+	defer s.fsMu.Unlock()
 
 	// Return early if the notification doesn't exist, before creating readDir for currentUser.
 	key := notificationKey(repo, threadType, threadID)
@@ -303,7 +320,7 @@ func (s service) MarkRead(ctx context.Context, repo notifications.RepoSpec, thre
 	return nil
 }
 
-func (s service) MarkAllRead(ctx context.Context, repo notifications.RepoSpec) error {
+func (s *service) MarkAllRead(ctx context.Context, repo notifications.RepoSpec) error {
 	currentUser, err := s.users.GetAuthenticatedSpec(ctx)
 	if err != nil {
 		return err
@@ -311,6 +328,9 @@ func (s service) MarkAllRead(ctx context.Context, repo notifications.RepoSpec) e
 	if currentUser.ID == 0 {
 		return os.ErrPermission
 	}
+
+	s.fsMu.Lock()
+	defer s.fsMu.Unlock()
 
 	// Iterate all user's notifications.
 	fis, err := vfsutil.ReadDir(ctx, s.fs, notificationsDir(currentUser))
@@ -364,7 +384,7 @@ func (s service) MarkAllRead(ctx context.Context, repo notifications.RepoSpec) e
 	return nil
 }
 
-func (s service) user(ctx context.Context, user users.UserSpec) users.User {
+func (s *service) user(ctx context.Context, user users.UserSpec) users.User {
 	u, err := s.users.Get(ctx, user)
 	if err != nil {
 		return users.User{

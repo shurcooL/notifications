@@ -9,9 +9,9 @@ import (
 	"github.com/shurcooL/users"
 )
 
-var _ notifications.CopierFrom = service{}
+var _ notifications.CopierFrom = &service{}
 
-func (s service) CopyFrom(ctx context.Context, src notifications.Service, dst users.UserSpec) error {
+func (s *service) CopyFrom(ctx context.Context, src notifications.Service, dst users.UserSpec) error {
 	// List all accessible notifications.
 	ns, err := src.List(ctx, notifications.ListOptions{})
 	if err != nil {
