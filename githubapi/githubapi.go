@@ -332,10 +332,11 @@ func (s service) MarkRead(ctx context.Context, rs notifications.RepoSpec, thread
 		return err
 	}
 
+	var alsoLookWithoutCache bool
+
 	// First, iterate over all pages of notifications, looking for the specified notification.
 	// It's okay to use with-cache client here, because we don't mind seeing read notifications
 	// for the purposes of MarkRead. They'll be skipped if the notification ID doesn't match.
-	var fromCache bool
 	ghOpt := &githubv3.NotificationListOptions{ListOptions: githubv3.ListOptions{PerPage: 100}}
 	for {
 		cached, resp, err := ghListRepositoryNotifications(ctx, s.clV3, repo.Owner, repo.Repo, ghOpt, true)
@@ -343,7 +344,9 @@ func (s service) MarkRead(ctx context.Context, rs notifications.RepoSpec, thread
 			return fmt.Errorf("failed to ListRepositoryNotifications: %v", err)
 		}
 		if _, ok := resp.Response.Header[httpcache.XFromCache]; ok {
-			fromCache = true
+			// If and only if any of the responses come from cache,
+			// we'll want to look again without cache before giving up.
+			alsoLookWithoutCache = true
 		}
 		if notif, err := findNotification(cached, threadType, threadID); err != nil {
 			return err
@@ -361,7 +364,7 @@ func (s service) MarkRead(ctx context.Context, rs notifications.RepoSpec, thread
 	// to be retrieved from cache, and a legitimate existing notification is not marked read.
 	// So fall back to skipping cache, if we can't find a notification and the response
 	// we got was from cache (rather than origin server).
-	if fromCache {
+	if alsoLookWithoutCache {
 		ghOpt.Page = 0
 		for {
 			uncached, resp, err := ghListRepositoryNotifications(ctx, s.clV3, repo.Owner, repo.Repo, ghOpt, false)
