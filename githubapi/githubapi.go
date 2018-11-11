@@ -51,13 +51,12 @@ type service struct {
 }
 
 func (s service) List(ctx context.Context, opt notifications.ListOptions) (notifications.Notifications, error) {
-	var ns []notifications.Notification
+	var ghNotifications []*githubv3.Notification
 
 	ghOpt := &githubv3.NotificationListOptions{
 		All:         opt.All,
 		ListOptions: githubv3.ListOptions{PerPage: 100},
 	}
-	var ghNotifications []*githubv3.Notification
 	switch opt.Repo {
 	case nil:
 		for {
@@ -88,7 +87,81 @@ func (s service) List(ctx context.Context, opt notifications.ListOptions) (notif
 			ghOpt.Page = resp.NextPage
 		}
 	}
-	for _, n := range ghNotifications {
+
+	type (
+		issueFragment struct {
+			State    githubv4.IssueState
+			Author   *githubV4Actor
+			Comments struct {
+				Nodes []struct {
+					Author     *githubV4Actor
+					DatabaseID uint64
+				}
+			} `graphql:"comments(last:1)"`
+		}
+		prFragment struct {
+			State    githubv4.PullRequestState
+			Author   *githubV4Actor
+			Comments struct {
+				Nodes []struct {
+					Author     *githubV4Actor
+					DatabaseID uint64
+					CreatedAt  time.Time
+				}
+			} `graphql:"comments(last:1)"`
+			Reviews struct {
+				Nodes []struct {
+					Author     *githubV4Actor
+					DatabaseID uint64
+					CreatedAt  time.Time
+				}
+			} `graphql:"reviews(last:1)"`
+		}
+	)
+
+	var fields []reflect.StructField
+	for i, n := range ghNotifications {
+		switch *n.Subject.Type {
+		case "Issue":
+			rs, issueID, err := parseIssueSpec(*n.Subject.URL)
+			if err != nil {
+				return nil, err
+			}
+			fields = append(fields, reflect.StructField{
+				Tag:  graphqlTag(fmt.Sprintf("repository%d:repository(owner:%q,name:%q)", i, rs.Owner, rs.Repo)),
+				Name: fmt.Sprintf("Repository%d", i),
+				Type: reflect.StructOf([]reflect.StructField{{
+					Tag:  graphqlTag(fmt.Sprintf("issue(number:%d)", issueID)),
+					Name: "Issue",
+					Type: reflect.TypeOf(issueFragment{}),
+				}}),
+			})
+		case "PullRequest":
+			rs, prID, err := parsePullRequestSpec(*n.Subject.URL)
+			if err != nil {
+				return nil, err
+			}
+			fields = append(fields, reflect.StructField{
+				Tag:  graphqlTag(fmt.Sprintf("repository%d:repository(owner:%q,name:%q)", i, rs.Owner, rs.Repo)),
+				Name: fmt.Sprintf("Repository%d", i),
+				Type: reflect.StructOf([]reflect.StructField{{
+					Tag:  graphqlTag(fmt.Sprintf("pullRequest(number:%d)", prID)),
+					Name: "PullRequest",
+					Type: reflect.TypeOf(prFragment{}),
+				}}),
+			})
+		}
+	}
+	q := reflect.New(reflect.StructOf(fields)).Elem()
+	if len(fields) > 0 {
+		err := s.clV4.Query(ctx, q.Addr().Interface(), nil)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	var ns []notifications.Notification
+	for i, n := range ghNotifications {
 		notification := notifications.Notification{
 			RepoSpec:   notifications.RepoSpec{URI: "github.com/" + *n.Repository.FullName},
 			ThreadType: *n.Subject.Type,
@@ -100,46 +173,16 @@ func (s service) List(ctx context.Context, opt notifications.ListOptions) (notif
 			Mentioned:     *n.Reason == "mention",
 		}
 
-		// TODO: We're inside range ghNotifications loop here, and doing a single
-		//       GraphQL query for each Issue/PR. It would be better to combine
-		//       all the individual queries into a single GraphQL query and execute
-		//       that in one request instead. Need to come up with a good way of making
-		//       this possible. See https://github.com/shurcooL/githubv4/issues/17.
-
 		switch *n.Subject.Type {
 		case "Issue":
-			// This makes a single GraphQL API call. It's relatively slow/expensive
-			// because it happens in the ghNotifications loop.
-
+			issue := q.FieldByName(fmt.Sprintf("Repository%d", i)).FieldByName("Issue").Interface().(issueFragment)
+			// TODO: Don't do parseIssueSpec twice.
 			rs, issueID, err := parseIssueSpec(*n.Subject.URL)
 			if err != nil {
 				return ns, err
 			}
 			notification.ThreadID = issueID
-			var q struct {
-				Repository struct {
-					Issue struct {
-						State    githubv4.IssueState
-						Author   *githubV4Actor
-						Comments struct {
-							Nodes []struct {
-								Author     *githubV4Actor
-								DatabaseID uint64
-							}
-						} `graphql:"comments(last:1)"`
-					} `graphql:"issue(number:$issueNumber)"`
-				} `graphql:"repository(owner:$repositoryOwner,name:$repositoryName)"`
-			}
-			variables := map[string]interface{}{
-				"repositoryOwner": githubv4.String(rs.Owner),
-				"repositoryName":  githubv4.String(rs.Repo),
-				"issueNumber":     githubv4.Int(issueID),
-			}
-			err = s.clV4.Query(ctx, &q, variables)
-			if err != nil {
-				return ns, err
-			}
-			switch q.Repository.Issue.State {
+			switch issue.State {
 			case githubv4.IssueStateOpen:
 				notification.Icon = "issue-opened"
 				notification.Color = notifications.RGB{R: 0x6c, G: 0xc6, B: 0x44} // Green.
@@ -147,56 +190,24 @@ func (s service) List(ctx context.Context, opt notifications.ListOptions) (notif
 				notification.Icon = "issue-closed"
 				notification.Color = notifications.RGB{R: 0xbd, G: 0x2c, B: 0x00} // Red.
 			}
-			switch len(q.Repository.Issue.Comments.Nodes) {
+			switch len(issue.Comments.Nodes) {
 			case 0:
-				notification.Actor = ghActor(q.Repository.Issue.Author)
+				notification.Actor = ghActor(issue.Author)
 				notification.HTMLURL = s.rtr.IssueURL(ctx, rs.Owner, rs.Repo, issueID)
 			case 1:
-				notification.Actor = ghActor(q.Repository.Issue.Comments.Nodes[0].Author)
-				notification.HTMLURL = s.rtr.IssueCommentURL(ctx, rs.Owner, rs.Repo, issueID, q.Repository.Issue.Comments.Nodes[0].DatabaseID)
+				notification.Actor = ghActor(issue.Comments.Nodes[0].Author)
+				notification.HTMLURL = s.rtr.IssueCommentURL(ctx, rs.Owner, rs.Repo, issueID, issue.Comments.Nodes[0].DatabaseID)
 			}
 		case "PullRequest":
-			// This makes a single GraphQL API call. It's relatively slow/expensive
-			// because it happens in the ghNotifications loop.
-
+			pr := q.FieldByName(fmt.Sprintf("Repository%d", i)).FieldByName("PullRequest").Interface().(prFragment)
+			// TODO: Don't do parsePullRequestSpec twice.
 			rs, prID, err := parsePullRequestSpec(*n.Subject.URL)
 			if err != nil {
 				return ns, err
 			}
 			notification.ThreadID = prID
-			var q struct {
-				Repository struct {
-					PullRequest struct {
-						State    githubv4.PullRequestState
-						Author   *githubV4Actor
-						Comments struct {
-							Nodes []struct {
-								Author     *githubV4Actor
-								DatabaseID uint64
-								CreatedAt  time.Time
-							}
-						} `graphql:"comments(last:1)"`
-						Reviews struct {
-							Nodes []struct {
-								Author     *githubV4Actor
-								DatabaseID uint64
-								CreatedAt  time.Time
-							}
-						} `graphql:"reviews(last:1)"`
-					} `graphql:"pullRequest(number:$prNumber)"`
-				} `graphql:"repository(owner:$repositoryOwner,name:$repositoryName)"`
-			}
-			variables := map[string]interface{}{
-				"repositoryOwner": githubv4.String(rs.Owner),
-				"repositoryName":  githubv4.String(rs.Repo),
-				"prNumber":        githubv4.Int(prID),
-			}
-			err = s.clV4.Query(ctx, &q, variables)
-			if err != nil {
-				return ns, err
-			}
 			notification.Icon = "git-pull-request"
-			switch q.Repository.PullRequest.State {
+			switch pr.State {
 			case githubv4.PullRequestStateOpen:
 				notification.Color = notifications.RGB{R: 0x6c, G: 0xc6, B: 0x44} // Green.
 			case githubv4.PullRequestStateClosed:
@@ -204,9 +215,9 @@ func (s service) List(ctx context.Context, opt notifications.ListOptions) (notif
 			case githubv4.PullRequestStateMerged:
 				notification.Color = notifications.RGB{R: 0x6e, G: 0x54, B: 0x94} // Purple.
 			}
-			switch c, r := q.Repository.PullRequest.Comments.Nodes, q.Repository.PullRequest.Reviews.Nodes; {
+			switch c, r := pr.Comments.Nodes, pr.Reviews.Nodes; {
 			case len(c) == 0 && len(r) == 0:
-				notification.Actor = ghActor(q.Repository.PullRequest.Author)
+				notification.Actor = ghActor(pr.Author)
 				notification.HTMLURL = s.rtr.PullRequestURL(ctx, rs.Owner, rs.Repo, prID)
 			case len(c) == 1 && len(r) == 0:
 				notification.Actor = ghActor(c[0].Author)
@@ -287,8 +298,12 @@ func (s service) List(ctx context.Context, opt notifications.ListOptions) (notif
 
 		ns = append(ns, notification)
 	}
-
 	return ns, nil
+}
+
+// graphqlTag returns a `graphql:"{value}"` struct field tag string.
+func graphqlTag(value string) reflect.StructTag {
+	return reflect.StructTag(strconv.AppendQuote([]byte("graphql:"), value))
 }
 
 func (s service) Count(ctx context.Context, opt interface{}) (uint64, error) {
