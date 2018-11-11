@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"dmitri.shuralyov.com/route/github"
@@ -37,10 +38,11 @@ func NewService(clientV3 *githubv3.Client, clientV4 *githubv4.Client, router git
 	if router == nil {
 		router = github.DotCom{}
 	}
-	return service{
-		clV3: clientV3,
-		clV4: clientV4,
-		rtr:  router,
+	return &service{
+		clV3:  clientV3,
+		clV4:  clientV4,
+		rtr:   router,
+		cache: make(map[string]notifications.Notification),
 	}
 }
 
@@ -48,9 +50,12 @@ type service struct {
 	clV3 *githubv3.Client // GitHub REST API v3 client.
 	clV4 *githubv4.Client // GitHub GraphQL API v4 client.
 	rtr  github.Router
+
+	cacheMu sync.Mutex
+	cache   map[string]notifications.Notification
 }
 
-func (s service) List(ctx context.Context, opt notifications.ListOptions) (notifications.Notifications, error) {
+func (s *service) List(ctx context.Context, opt notifications.ListOptions) (notifications.Notifications, error) {
 	var ghNotifications []*githubv3.Notification
 
 	ghOpt := &githubv3.NotificationListOptions{
@@ -119,8 +124,23 @@ func (s service) List(ctx context.Context, opt notifications.ListOptions) (notif
 		}
 	)
 
+	var used map[string]bool // A set of used notification IDs, for unused cache eviction.
+	if opt.Repo == nil {
+		// Only evict cache if listing notifications across all repos.
+		used = make(map[string]bool)
+	}
 	var fields []reflect.StructField
 	for i, n := range ghNotifications {
+		if used != nil {
+			used[*n.ID] = true
+		}
+		s.cacheMu.Lock()
+		cached, ok := s.cache[*n.ID]
+		s.cacheMu.Unlock()
+		if ok && n.UpdatedAt.Equal(cached.UpdatedAt) {
+			continue
+		}
+
 		switch *n.Subject.Type {
 		case "Issue":
 			rs, issueID, err := parseIssueSpec(*n.Subject.URL)
@@ -159,9 +179,27 @@ func (s service) List(ctx context.Context, opt notifications.ListOptions) (notif
 			return nil, err
 		}
 	}
+	if used != nil {
+		// Evict unused cache.
+		s.cacheMu.Lock()
+		for id := range s.cache {
+			if !used[id] {
+				delete(s.cache, id)
+			}
+		}
+		s.cacheMu.Unlock()
+	}
 
 	var ns []notifications.Notification
 	for i, n := range ghNotifications {
+		s.cacheMu.Lock()
+		cached, ok := s.cache[*n.ID]
+		s.cacheMu.Unlock()
+		if ok && n.UpdatedAt.Equal(cached.UpdatedAt) {
+			ns = append(ns, cached)
+			continue
+		}
+
 		notification := notifications.Notification{
 			RepoSpec:   notifications.RepoSpec{URI: "github.com/" + *n.Repository.FullName},
 			ThreadType: *n.Subject.Type,
@@ -296,6 +334,10 @@ func (s service) List(ctx context.Context, opt notifications.ListOptions) (notif
 			log.Printf("unsupported *n.Subject.Type: %q\n", *n.Subject.Type)
 		}
 
+		s.cacheMu.Lock()
+		s.cache[*n.ID] = notification
+		s.cacheMu.Unlock()
+
 		ns = append(ns, notification)
 	}
 	return ns, nil
@@ -306,7 +348,7 @@ func graphqlTag(value string) reflect.StructTag {
 	return reflect.StructTag(strconv.AppendQuote([]byte("graphql:"), value))
 }
 
-func (s service) Count(ctx context.Context, opt interface{}) (uint64, error) {
+func (s *service) Count(ctx context.Context, opt interface{}) (uint64, error) {
 	ghOpt := &githubv3.NotificationListOptions{ListOptions: githubv3.ListOptions{PerPage: 1}}
 	ghNotifications, resp, err := ghListNotifications(ctx, s.clV3, ghOpt, false)
 	if err != nil {
@@ -319,7 +361,7 @@ func (s service) Count(ctx context.Context, opt interface{}) (uint64, error) {
 	}
 }
 
-func (s service) MarkRead(ctx context.Context, rs notifications.RepoSpec, threadType string, threadID uint64) error {
+func (s *service) MarkRead(ctx context.Context, rs notifications.RepoSpec, threadType string, threadID uint64) error {
 	switch threadType {
 	case "Commit", "Release", "RepositoryInvitation":
 		_, err := s.clV3.Activity.MarkThreadRead(ctx, strconv.FormatUint(threadID, 10))
@@ -405,7 +447,7 @@ func (s service) MarkRead(ctx context.Context, rs notifications.RepoSpec, thread
 	return nil
 }
 
-func (s service) markRead(ctx context.Context, n *githubv3.Notification) error {
+func (s *service) markRead(ctx context.Context, n *githubv3.Notification) error {
 	_, err := s.clV3.Activity.MarkThreadRead(ctx, *n.ID)
 	if err != nil {
 		return fmt.Errorf("failed to MarkThreadRead: %v", err)
@@ -451,7 +493,7 @@ func findNotification(ns []*githubv3.Notification, threadType string, threadID u
 	return nil, nil
 }
 
-func (s service) MarkAllRead(ctx context.Context, rs notifications.RepoSpec) error {
+func (s *service) MarkAllRead(ctx context.Context, rs notifications.RepoSpec) error {
 	repo, err := ghRepoSpec(rs)
 	if err != nil {
 		return err
@@ -463,12 +505,12 @@ func (s service) MarkAllRead(ctx context.Context, rs notifications.RepoSpec) err
 	return nil
 }
 
-func (s service) Notify(ctx context.Context, repo notifications.RepoSpec, threadType string, threadID uint64, op notifications.NotificationRequest) error {
+func (s *service) Notify(ctx context.Context, repo notifications.RepoSpec, threadType string, threadID uint64, op notifications.NotificationRequest) error {
 	// Nothing to do. GitHub takes care of this on their end, even when creating comments/issues via API.
 	return nil
 }
 
-func (s service) Subscribe(ctx context.Context, repo notifications.RepoSpec, threadType string, threadID uint64, subscribers []users.UserSpec) error {
+func (s *service) Subscribe(ctx context.Context, repo notifications.RepoSpec, threadType string, threadID uint64, subscribers []users.UserSpec) error {
 	// Nothing to do. GitHub takes care of this on their end, even when creating comments/issues via API.
 	return nil
 }
@@ -477,7 +519,7 @@ func (s service) Subscribe(ctx context.Context, repo notifications.RepoSpec, thr
 // to fetch an object that contains a User or Author, who is taken to be
 // the actor that triggered the notification. It returns an error only if
 // something unexpected happened.
-func (s service) getNotificationActor(ctx context.Context, subject githubv3.NotificationSubject) (users.User, error) {
+func (s *service) getNotificationActor(ctx context.Context, subject githubv3.NotificationSubject) (users.User, error) {
 	var apiURL string
 	if subject.LatestCommentURL != nil {
 		apiURL = *subject.LatestCommentURL
@@ -521,7 +563,7 @@ func getCommitURL(subject githubv3.NotificationSubject) (string, error) {
 
 // getReleaseURL makes a single API call to get the Release HTMLURL
 // from the given releaseAPIURL.
-func (s service) getReleaseURL(ctx context.Context, releaseAPIURL string) (string, error) {
+func (s *service) getReleaseURL(ctx context.Context, releaseAPIURL string) (string, error) {
 	req, err := s.clV3.NewRequest("GET", releaseAPIURL, nil)
 	if err != nil {
 		return "", err
